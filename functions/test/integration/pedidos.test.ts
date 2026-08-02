@@ -18,7 +18,7 @@ import { getAdminApp } from "../helpers/adminApp";
 
 async function criarProduto(
   adminUser: TestUser,
-  overrides: Partial<{ nome: string; preco: number; estoque: number }> = {}
+  overrides: Partial<{ nome: string; preco: number; estoque: number }> = {},
 ): Promise<string> {
   const res = await request(app)
     .post("/produtos")
@@ -69,7 +69,9 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
 
   it("RN09: criar pedido sem token -> 401", async () => {
     const produtoId = await criarProduto(adminUser);
-    const res = await request(app).post("/pedidos").send({ itens: [{ produtoId, quantidade: 1 }] });
+    const res = await request(app)
+      .post("/pedidos")
+      .send({ itens: [{ produtoId, quantidade: 1 }] });
     expect(res.status).toBe(401);
   });
 
@@ -104,12 +106,16 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
         .set("Authorization", `Bearer ${clienteB.idToken}`)
         .send({ itens: [{ produtoId, quantidade: 1 }] });
 
-      const listaA = await request(app).get("/pedidos").set("Authorization", `Bearer ${clienteA.idToken}`);
+      const listaA = await request(app)
+        .get("/pedidos")
+        .set("Authorization", `Bearer ${clienteA.idToken}`);
       expect(listaA.status).toBe(200);
       expect(listaA.body.every((p: any) => p.clienteId === clienteA.uid)).toBe(true);
       expect(listaA.body.some((p: any) => p.id === pedidoB.body.id)).toBe(false);
 
-      const listaAdmin = await request(app).get("/pedidos").set("Authorization", `Bearer ${adminUser.idToken}`);
+      const listaAdmin = await request(app)
+        .get("/pedidos")
+        .set("Authorization", `Bearer ${adminUser.idToken}`);
       expect(listaAdmin.status).toBe(200);
       const ids = listaAdmin.body.map((p: any) => p.id);
       expect(ids).toEqual(expect.arrayContaining([pedidoA.body.id, pedidoB.body.id]));

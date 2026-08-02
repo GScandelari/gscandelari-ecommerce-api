@@ -68,7 +68,9 @@ describe("Produtos - RN01, RN07, RN09 (Modulo 3 - Epico 3.2)", () => {
     });
 
     it("RN09: sem token -> 401", async () => {
-      const res = await request(app).post("/produtos").send({ nome: "Camiseta", preco: 49.9, estoque: 10 });
+      const res = await request(app)
+        .post("/produtos")
+        .send({ nome: "Camiseta", preco: 49.9, estoque: 10 });
 
       expect(res.status).toBe(401);
     });
@@ -84,7 +86,9 @@ describe("Produtos - RN01, RN07, RN09 (Modulo 3 - Epico 3.2)", () => {
     }
 
     it("RN09: GET /produtos autenticado -> 200 com lista", async () => {
-      const res = await request(app).get("/produtos").set("Authorization", `Bearer ${cliente.idToken}`);
+      const res = await request(app)
+        .get("/produtos")
+        .set("Authorization", `Bearer ${cliente.idToken}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
     });
@@ -96,7 +100,9 @@ describe("Produtos - RN01, RN07, RN09 (Modulo 3 - Epico 3.2)", () => {
 
     it("GET /produtos/:id existente -> 200", async () => {
       const id = await criarProdutoDeTeste();
-      const res = await request(app).get(`/produtos/${id}`).set("Authorization", `Bearer ${cliente.idToken}`);
+      const res = await request(app)
+        .get(`/produtos/${id}`)
+        .set("Authorization", `Bearer ${cliente.idToken}`);
       expect(res.status).toBe(200);
       expect(res.body.id).toBe(id);
     });
@@ -138,13 +144,17 @@ describe("Produtos - RN01, RN07, RN09 (Modulo 3 - Epico 3.2)", () => {
 
     it("RN07: DELETE /produtos/:id admin remove produto existente -> 204", async () => {
       const id = await criarProdutoDeTeste();
-      const res = await request(app).delete(`/produtos/${id}`).set("Authorization", `Bearer ${adminUser.idToken}`);
+      const res = await request(app)
+        .delete(`/produtos/${id}`)
+        .set("Authorization", `Bearer ${adminUser.idToken}`);
       expect(res.status).toBe(204);
     });
 
     it("RN07: DELETE /produtos/:id nao-admin -> 403", async () => {
       const id = await criarProdutoDeTeste();
-      const res = await request(app).delete(`/produtos/${id}`).set("Authorization", `Bearer ${cliente.idToken}`);
+      const res = await request(app)
+        .delete(`/produtos/${id}`)
+        .set("Authorization", `Bearer ${cliente.idToken}`);
       expect(res.status).toBe(403);
     });
 

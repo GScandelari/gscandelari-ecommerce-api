@@ -71,9 +71,18 @@ Regras práticas:
 
 ```bash
 cd functions
-npm run lint          # quando o setup de lint (Task 1.3.1) estiver disponível
+npm run lint          # ESLint + regras TypeScript
+npm run format:check  # Prettier (use `npm run format` para corrigir)
 npm run build          # TypeScript compila sem erros
 npm run test:emulator  # suíte Jest+Supertest contra o Firebase Emulator Suite
 ```
 
-Nota sobre o estado atual do repositório (ver `README.md` > "Estado atual do projeto"): a suíte de testes está em estado "vermelho" esperado (TDD) até a implementação do Módulo 2 (Core Business) do `BACKLOG.md`, e o script `lint` ainda não existe até a Task 1.3.1 ser concluída. Isso é esperado nesta fase e não deve bloquear commits de infraestrutura/documentação como este.
+Nota sobre o estado atual do repositório (ver `README.md` > "Estado atual do projeto"): a suíte de testes está em estado "vermelho" esperado (TDD) até a implementação do Módulo 2 (Core Business) do `BACKLOG.md`. Isso é esperado nesta fase e não deve bloquear commits de infraestrutura/documentação.
+
+## 5. Hook de pre-commit (Task 1.3.2)
+
+O repositório versiona um hook em `.husky/pre-commit` que roda `npm run lint` antes de cada commit e bloqueia o commit se houver erro de lint. Como hooks do Git não são ativados automaticamente ao clonar, rode uma vez após clonar o repositório:
+
+```bash
+git config core.hooksPath .husky
+```

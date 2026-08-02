@@ -12,9 +12,10 @@ describe("Infra de testes", () => {
     expect(1 + 1).toBe(2);
   });
 
-  it("Task 3.1.2: GET /health via Supertest contra o app importado retorna 200", async () => {
+  it("Task 3.1.2 / 1.2.3: GET /health via Supertest retorna 200 e expõe APP_ENV", async () => {
     const response = await request(app).get("/health");
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: "ok" });
+    expect(response.body).toHaveProperty("status", "ok");
+    expect(response.body).toHaveProperty("env");
   });
 });

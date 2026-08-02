@@ -18,7 +18,7 @@ export async function clearFirestoreEmulator(): Promise<void> {
     const body = await response.text();
     throw new Error(
       `Falha ao limpar o Firestore Emulator (${response.status}): ${body}. ` +
-        "Verifique se o Firestore Emulator esta rodando (npm run test:emulator)."
+        "Verifique se o Firestore Emulator esta rodando (npm run test:emulator).",
     );
   }
 }

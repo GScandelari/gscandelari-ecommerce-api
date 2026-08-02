@@ -20,10 +20,11 @@ export function createApp(): Express {
   app.use(cors());
   app.use(express.json());
 
-  // Sanity check de infraestrutura (Task 1.2.2 / 3.1.2) - unica rota
-  // implementada neste estagio de bootstrap.
+  // Sanity check de infraestrutura (Task 1.2.2 / 3.1.2 / 1.2.3) - unica rota
+  // implementada neste estagio de bootstrap. APP_ENV demonstra leitura de
+  // variavel de ambiente local (ver functions/.env.example).
   app.get("/health", (_req, res) => {
-    res.status(200).json({ status: "ok" });
+    res.status(200).json({ status: "ok", env: process.env.APP_ENV ?? "unknown" });
   });
 
   // NAO adicionar rotas de negocio aqui. Ver Modulo 2 do BACKLOG.md:

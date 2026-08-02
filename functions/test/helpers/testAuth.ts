@@ -46,7 +46,7 @@ async function signInAndGetIdToken(email: string, password: string): Promise<str
     const body = await response.text();
     throw new Error(
       `Falha ao autenticar usuario de teste no Auth Emulator (${response.status}): ${body}. ` +
-        "Verifique se o Auth Emulator esta rodando (npm run test:emulator)."
+        "Verifique se o Auth Emulator esta rodando (npm run test:emulator).",
     );
   }
 

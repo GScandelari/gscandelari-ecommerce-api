@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Pre-commit hook (Task 1.3.2): bloqueia commit com erro de lint.
+# Ativado via `git config core.hooksPath .husky` (ver CONTRIBUTING.md).
+set -e
+npm --prefix functions run lint
