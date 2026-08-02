@@ -14,20 +14,20 @@
 ### Módulo 1: Setup & Infra
 
 - **Épico 1.1: Inicialização do monorepo e projeto Firebase**
-  - [ ] Task 1.1.1: Criar repositório e estrutura de pastas do monorepo (`functions/`, `docs/`, etc.) (critério de aceite: estrutura de pastas conforme convenção definida existe; primeiro commit realizado)
-  - [ ] Task 1.1.2: Inicializar projeto Firebase (`firebase init`) com Functions 2ª geração (Node 20), Firestore e Emulator Suite (Auth + Firestore + Functions) (critério de aceite: `firebase.json`/`.firebaserc` criados; `firebase emulators:start` sobe os 3 emuladores sem erro)
-  - [ ] Task 1.1.3: Configurar Firestore em modo nativo com `firestore.rules` restritivas (deny-all para client SDK; acesso só via backend/Admin SDK) (critério de aceite: tentativa de leitura/escrita direta via client SDK é negada, validado no emulator)
+  - [x] Task 1.1.1: Criar repositório e estrutura de pastas do monorepo (`functions/`, `docs/`, etc.) (critério de aceite: estrutura de pastas conforme convenção definida existe; primeiro commit realizado)
+  - [x] Task 1.1.2: Inicializar projeto Firebase (`firebase init`) com Functions 2ª geração (Node 20), Firestore e Emulator Suite (Auth + Firestore + Functions) (critério de aceite: `firebase.json`/`.firebaserc` criados; `firebase emulators:start` sobe os 3 emuladores sem erro)
+  - [x] Task 1.1.3: Configurar Firestore em modo nativo com `firestore.rules` restritivas (deny-all para client SDK; acesso só via backend/Admin SDK) (critério de aceite: tentativa de leitura/escrita direta via client SDK é negada, validado no emulator)
   Dependências: nenhuma (ponto de partida do projeto).
 
 - **Épico 1.2: TypeScript + Express skeleton**
-  - [ ] Task 1.2.1: Configurar TypeScript em `functions/` (tsconfig, scripts de build) (critério de aceite: `npm run build` compila sem erros e gera artefato de saída)
-  - [ ] Task 1.2.2: Criar app Express básico exportado como Cloud Function HTTPS 2ª geração (`onRequest`) (critério de aceite: `GET /health` retorna 200 `{"status":"ok"}` no emulator)
-  - [ ] Task 1.2.3: Configurar variáveis de ambiente locais para o emulator (critério de aceite: app lê uma variável de exemplo e a expõe em `/health` ou log, sem erro no emulator)
+  - [x] Task 1.2.1: Configurar TypeScript em `functions/` (tsconfig, scripts de build) (critério de aceite: `npm run build` compila sem erros e gera artefato de saída)
+  - [x] Task 1.2.2: Criar app Express básico exportado como Cloud Function HTTPS 2ª geração (`onRequest`) (critério de aceite: `GET /health` retorna 200 `{"status":"ok"}` no emulator)
+  - [x] Task 1.2.3: Configurar variáveis de ambiente locais para o emulator (critério de aceite: app lê uma variável de exemplo e a expõe em `/health` ou log, sem erro no emulator)
   Dependências: Task 1.1.2.
 
 - **Épico 1.3: Qualidade de código e estrutura**
-  - [ ] Task 1.3.1: Configurar ESLint + Prettier com regras TypeScript (critério de aceite: `npm run lint` roda sem erro no projeto inicial; arquivo propositalmente mal formatado é detectado)
-  - [ ] Task 1.3.2: Configurar hook de pre-commit (husky/lint-staged ou script equivalente) (critério de aceite: commit contendo erro de lint é bloqueado localmente)
+  - [x] Task 1.3.1: Configurar ESLint + Prettier com regras TypeScript (critério de aceite: `npm run lint` roda sem erro no projeto inicial; arquivo propositalmente mal formatado é detectado)
+  - [x] Task 1.3.2: Configurar hook de pre-commit (husky/lint-staged ou script equivalente) (critério de aceite: commit contendo erro de lint é bloqueado localmente)
   - [ ] Task 1.3.3: Definir estrutura de pastas internas de `src/` (`routes/`, `models/`, `middlewares/`, `services/`, `repositories/`, `utils/`) com path aliases (critério de aceite: import via alias compila e resolve corretamente)
   Dependências: Task 1.2.1 (lint/estrutura podem rodar em paralelo à 1.2.2/1.2.3).
 
