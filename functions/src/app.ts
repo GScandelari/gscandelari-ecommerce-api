@@ -1,8 +1,10 @@
 import express, { Express } from "express";
 import cors from "cors";
+import swaggerUi from "swagger-ui-express";
 import produtosRouter from "@/routes/produtos.routes";
 import pedidosRouter from "@/routes/pedidos.routes";
 import { errorHandler } from "@/middlewares/errorHandler";
+import openapiDocument from "@/openapi.json";
 
 export function createApp(): Express {
   const app = express();
@@ -14,6 +16,9 @@ export function createApp(): Express {
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok", env: process.env.APP_ENV ?? "unknown" });
   });
+
+  // Task 2.7.2: Swagger UI de dev/emulator, sem autenticacao (sao so docs).
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiDocument));
 
   app.use("/produtos", produtosRouter);
   app.use("/pedidos", pedidosRouter);

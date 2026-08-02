@@ -80,8 +80,8 @@
   Dependências: Épicos 2.1, 2.2, 2.3, 2.4 e Épico 2.5 (Produtos precisam existir para Pedidos referenciá-los); Task 2.6.1 antes de 2.6.5 e 2.6.6.
 
 - **Épico 2.7: Documentação OpenAPI/Swagger**
-  - [ ] Task 2.7.1: Especificação OpenAPI 3.0 (paths, schemas, security schemes) para Produtos e Pedidos (critério de aceite: arquivo `openapi.yaml`/`.json` válido em linter de OpenAPI, cobrindo todos os endpoints dos Épicos 2.5 e 2.6)
-  - [ ] Task 2.7.2: Expor Swagger UI (`swagger-ui-express`) em `/docs` no ambiente de dev/emulator (critério de aceite: `GET /docs` no emulator renderiza UI navegável com todos os endpoints documentados)
+  - [x] Task 2.7.1: Especificação OpenAPI 3.0 (paths, schemas, security schemes) para Produtos e Pedidos (critério de aceite: arquivo `openapi.yaml`/`.json` válido em linter de OpenAPI, cobrindo todos os endpoints dos Épicos 2.5 e 2.6) — `functions/src/openapi.json`, validado com `npm run openapi:validate` (`@redocly/cli`): 0 erros.
+  - [x] Task 2.7.2: Expor Swagger UI (`swagger-ui-express`) em `/docs` no ambiente de dev/emulator (critério de aceite: `GET /docs` no emulator renderiza UI navegável com todos os endpoints documentados) — montado em `app.ts` sem autenticação (são só docs); coberto por teste de sanidade.
   Dependências: Épicos 2.5 e 2.6 com contratos definidos (pode iniciar em paralelo à implementação final, mas fecha só depois).
 
 #### Rastreabilidade RN → Tasks (Módulo 2)

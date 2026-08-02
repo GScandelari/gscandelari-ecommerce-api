@@ -18,4 +18,10 @@ describe("Infra de testes", () => {
     expect(response.body).toHaveProperty("status", "ok");
     expect(response.body).toHaveProperty("env");
   });
+
+  it("Task 2.7.2: GET /docs serve a Swagger UI", async () => {
+    const response = await request(app).get("/docs/");
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("swagger-ui");
+  });
 });

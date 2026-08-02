@@ -9,10 +9,9 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 ## Estado atual do projeto
 
 - **Módulo 1 (Setup & Infra)**: concluído. `firebase.json`, `.firebaserc`, `firestore.rules` (deny-all para client SDK), Firestore/Auth/Functions Emulator, TypeScript (com path alias `@/`), ESLint + Prettier e hook de pre-commit já configurados.
-- **Módulo 2 (Core Business)**: concluído. Modelos de dados, middlewares de autenticação/autorização (Firebase Auth + custom claim `admin`), validação Zod, tratamento de erro centralizado e os endpoints REST de `/produtos` e `/pedidos` (RN01-RN09, RN07a) estão implementados.
-- **Módulo 3 (Testes)**: concluído. `functions/test/` cobre RN01-RN09/RN07a via Jest + Supertest contra o Firebase Emulator Suite — **48/48 testes passando**, cobertura 96%+ (acima da meta de 70% do `SPEC.md`).
+- **Módulo 2 (Core Business)**: concluído. Modelos de dados, middlewares de autenticação/autorização (Firebase Auth + custom claim `admin`), validação Zod, tratamento de erro centralizado e os endpoints REST de `/produtos` e `/pedidos` (RN01-RN09, RN07a) estão implementados, incluindo documentação OpenAPI/Swagger em `/docs` (Épico 2.7).
+- **Módulo 3 (Testes)**: concluído. `functions/test/` cobre RN01-RN09/RN07a via Jest + Supertest contra o Firebase Emulator Suite — **49/49 testes passando**, cobertura 96%+ (acima da meta de 70% do `SPEC.md`).
 - **Módulo 4 (este documento + CI/CD)**: concluído. Git, CI/CD, README e estratégia de deploy documentados.
-- Pendente (não bloqueante para a Fase 1 funcionar): Épico 2.7 (documentação OpenAPI/Swagger em `/docs`).
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -56,8 +55,9 @@ Todo o código da API vive em `functions/`. Os emuladores usam sempre o projeto 
 3. Testar a API rodando:
    ```bash
    curl http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/health
-   # {"status":"ok"}
+   # {"status":"ok","env":"local"}
    ```
+4. Documentação interativa (Swagger UI, Épico 2.7): abra `http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/docs` no navegador.
    (a URL segue o padrão `http://localhost:<porta-functions>/<project-id>/<region>/<nome-da-function>/<rota>` do Functions Emulator 2ª geração)
 
 Alternativa para desenvolvimento rápido do Express sem subir o emulador de Functions: como `functions/src/app.ts` exporta o app Express puro, ele pode ser exercitado diretamente via Supertest nos testes (ver seção seguinte) sem precisar do Functions Emulator — mas para testar o fluxo real de ponta a ponta (incluindo Auth/Firestore), use `emulators:start` como acima.
