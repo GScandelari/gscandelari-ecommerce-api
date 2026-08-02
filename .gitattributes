@@ -1,0 +1,8 @@
+# Normaliza terminadores de linha para LF no repositório (independente do
+# ambiente local de desenvolvimento, ex.: Windows), evitando diffs
+# espúrios entre dev (Windows) e o runner do GitHub Actions (Ubuntu).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary

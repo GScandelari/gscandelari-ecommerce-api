@@ -1,0 +1,95 @@
+name: Deploy Firebase Functions
+
+# Implementa o Épico 4.2 (Task 4.2.3) e o Épico 4.5 (Task 4.5.1) do
+# BACKLOG.md.
+#
+# DECISÃO (Task 4.5.1): o deploy a partir de `main` é MANUAL, disparado via
+# `workflow_dispatch`, e não automático pós-merge. Motivo: este é um
+# projeto de portfólio/demonstração rodando em um projeto Firebase real
+# (plano Blaze); deploy automático a cada merge em `main` geraria custo e
+# risco desnecessários enquanto o Módulo 2 (Core Business) ainda está em
+# desenvolvimento incremental. A decisão pode ser revisitada (trocando o
+# gatilho para `push` em `main`) quando o projeto amadurecer — ver
+# README.md > "Deploy" para o registro completo desta decisão.
+#
+# Pré-requisitos antes de disparar este workflow (ver README.md > "Deploy"
+# e "Variáveis de ambiente e segredos"):
+#   1. Projeto Firebase real (Blaze) criado e configurado em .firebaserc
+#      (alias além de "default"/demo, ex.: "production").
+#   2. Secret do GitHub Actions `FIREBASE_SERVICE_ACCOUNT_KEY` configurado
+#      (JSON de uma Service Account com permissão de deploy de Functions —
+#      Task 4.4.3 do BACKLOG.md).
+#   3. Secrets de aplicação (se/quando existirem) configurados via
+#      `firebase functions:secrets:set` diretamente no Firebase Secret
+#      Manager (Task 4.4.2) — nunca como GitHub Secret nem em código.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite "deploy" para confirmar o deploy para o projeto Firebase real'
+        required: true
+
+defaults:
+  run:
+    working-directory: functions
+
+jobs:
+  deploy:
+    name: Build, testar e deployar functions (a partir de main)
+    runs-on: ubuntu-latest
+    # Guarda-corpo: só executa de fato se disparado a partir de `main` e
+    # com a confirmação explícita digitada pelo operador.
+    if: github.ref == 'refs/heads/main' && github.event.inputs.confirm == 'deploy'
+    # Environment "production" do GitHub: configure regras de proteção
+    # (ex.: required reviewers) em Settings > Environments para exigir
+    # aprovação manual adicional antes deste job rodar.
+    environment: production
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Configurar Java (necessário para Firestore/Auth Emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Instalar dependências (npm ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (TypeScript)
+        run: npm run build
+
+      - name: Testes (Jest + Supertest) contra o Firebase Emulator Suite
+        # Reexecuta o gate de qualidade antes de deployar, mesmo que `main`
+        # já tenha passado no CI no merge — defesa em profundidade.
+        run: npm run test:coverage:emulator
+
+      - name: Gravar credencial de Service Account (temporária, não commitada)
+        # O JSON nunca é impresso: vem de um GitHub Secret (mascarado nos
+        # logs) e é escrito num arquivo temporário do runner, apagado ao
+        # final do job (step "Remover credencial temporária").
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$RUNNER_TEMP/firebase-service-account.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+
+      - name: Deploy para Firebase Functions
+        run: npx firebase-tools deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          FIREBASE_PROJECT_ID: gscandelari-ecommerce-api
+
+      - name: Remover credencial temporária
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-service-account.json"

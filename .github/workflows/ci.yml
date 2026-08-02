@@ -1,0 +1,61 @@
+name: CI
+
+# Implementa o Épico 4.2 (CI/CD) do BACKLOG.md (Tasks 4.2.1 e 4.2.2):
+# instala dependências, roda lint e roda a suíte Jest + Supertest contra o
+# Firebase Emulator Suite (Auth + Firestore) em todo PR para main e em todo
+# push em main. Não faz deploy (ver workflow separado deploy.yml).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+defaults:
+  run:
+    working-directory: functions
+
+jobs:
+  ci:
+    name: Lint, build e testes (Firebase Emulator Suite)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Configurar Java (necessário para Firestore/Auth Emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Instalar dependências (npm ci)
+        run: npm ci
+
+      - name: Lint
+        # NOTA (estado atual do repositório, ver README.md > "Estado atual
+        # do projeto"): o script "lint" ainda não existe em package.json —
+        # depende da Task 1.3.1 (Módulo 1, ESLint + Prettier) do
+        # BACKLOG.md, ainda não implementada. Este step falhará até lá,
+        # de forma intencional: o gate de lint faz parte do pipeline desde
+        # já, e ficará verde assim que a Task 1.3.1 for concluída — sem
+        # necessidade de alterar este workflow.
+        run: npm run lint
+
+      - name: Build (TypeScript)
+        run: npm run build
+
+      - name: Testes (Jest + Supertest) contra o Firebase Emulator Suite
+        # firebase-tools é devDependency do projeto (functions/package.json),
+        # então `npx firebase-tools` usa a versão travada no package-lock.json,
+        # igual ao ambiente local. Nenhuma credencial de produção é usada
+        # aqui — apenas o Auth + Firestore Emulator, com o projeto demo
+        # "demo-gscandelari-ecommerce-api" (ver functions/package.json).
+        run: npm run test:coverage:emulator

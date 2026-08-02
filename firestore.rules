@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// Deny-all para o Client SDK: toda a API é acessada exclusivamente pelo
+// backend (Cloud Functions) via Admin SDK, que ignora estas regras.
+// Ver Task 1.1.3 do BACKLOG.md (Módulo 1 - fora do escopo deste agente,
+// mantido aqui apenas como pré-requisito mínimo para o Firestore Emulator
+// subir com um ruleset válido).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

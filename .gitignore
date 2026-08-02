@@ -1,0 +1,57 @@
+# === Dependências ===
+node_modules/
+functions/node_modules/
+
+# === Build / artefatos compilados ===
+lib/
+functions/lib/
+dist/
+build/
+
+# === Cobertura de testes ===
+coverage/
+functions/coverage/
+
+# === Firebase CLI / Emulator Suite ===
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+firestore-debug.*.log
+ui-debug.log
+pubsub-debug.log
+database-debug.log
+functions/firebase-debug.log
+functions/firebase-debug.*.log
+functions/firestore-debug.log
+functions/firestore-debug.*.log
+*.emulator-data/
+emulator-data/
+
+# === Credenciais e segredos (NUNCA commitar) ===
+# Service accounts, chaves privadas, exports de configuração sensível.
+# Segredos de runtime vivem no Firebase Secret Manager; credenciais de
+# deploy vivem em GitHub Actions Secrets. Ver README.md > "Variáveis de
+# ambiente e segredos".
+*.env
+.env
+.env.*
+!.env.example
+*serviceAccount*.json
+*service-account*.json
+*firebase-adminsdk*.json
+functions/.runtimeconfig.json
+.secrets/
+
+# === Editor / OS ===
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# === Logs diversos ===
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
