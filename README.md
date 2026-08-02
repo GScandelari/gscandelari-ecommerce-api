@@ -174,31 +174,33 @@ Workflows em `.github/workflows/`:
 
 ## Deploy
 
+### Estado atual: projeto real provisionado e com deploy ativo
+
+- **Projeto Firebase (Blaze):** `gscandelari-ecommerce-api` ([console](https://console.firebase.google.com/project/gscandelari-ecommerce-api/overview)), alias `production` em `.firebaserc`.
+- **Function URL:** `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api` (`/health`, `/docs`, `/produtos`, `/pedidos`).
+- **Política de limpeza do Artifact Registry** configurada (`firebase functions:artifacts:setpolicy`, imagens de container antigas removidas após 1 dia) — evita custo de armazenamento acumulado.
+- O primeiro deploy foi feito manualmente via Firebase CLI local (ver abaixo). O secret `FIREBASE_SERVICE_ACCOUNT_KEY` para o workflow `deploy.yml` (GitHub Actions) **ainda não foi configurado** — até lá, o deploy continua sendo feito localmente.
+
 ### Decisão registrada (Task 4.5.1 do `BACKLOG.md`): deploy MANUAL
 
-O deploy para o projeto Firebase real a partir de `main` é **manual**, disparado via `workflow_dispatch` (botão "Run workflow" no GitHub Actions, com um campo de confirmação obrigatório), e **não** automático a cada merge em `main`.
+O deploy a partir de `main` é **manual**, disparado via `workflow_dispatch` (botão "Run workflow" no GitHub Actions, com um campo de confirmação obrigatório) ou via CLI local, e **não** automático a cada merge em `main`. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo ainda assim `main` sempre *deployável* (princípio central do GitHub Flow). Essa decisão pode ser revisitada (trocando o gatilho para `push` em `main`) quando o time preferir deploy contínuo.
 
-**Motivo:** este é um projeto de portfólio rodando sobre um projeto Firebase real no plano Blaze (pré-requisito das Cloud Functions 2ª geração). Ainda não existe projeto Firebase de produção provisionado (ver "gap conhecido" abaixo), então deploy automático a cada merge não teria sequer onde apontar hoje. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo ainda assim `main` sempre *deployável* (princípio central do GitHub Flow) e o pipeline de deploy 100% automatizado/reprodutível uma vez disparado. Essa decisão pode ser revisitada (trocando o gatilho para `push` em `main`) quando o projeto de produção estiver provisionado e o time preferir deploy contínuo.
+### Deploy manual via GitHub Actions
 
-### Deploy manual via GitHub Actions (recomendado)
+Pré-requisito pendente: configurar o secret `FIREBASE_SERVICE_ACCOUNT_KEY` no GitHub (Settings > Secrets and variables > Actions), com uma Service Account JSON com permissão de deploy de Functions (gerada no Console do Firebase/Google Cloud — Project Settings > Service Accounts). Depois disso:
 
 1. Garanta que `main` está com o CI verde (badge/check do workflow `ci.yml`).
-2. Configure os pré-requisitos (uma única vez): projeto Firebase real criado, alias `production` adicionado a `.firebaserc` apontando para o ID real do projeto, e o secret `FIREBASE_SERVICE_ACCOUNT_KEY` configurado no GitHub (ver seção "Variáveis de ambiente e segredos").
-   > **Gap conhecido:** `.firebaserc` hoje só tem o alias `default` apontando para o projeto demo (`demo-gscandelari-ecommerce-api`), usado pelos emuladores. Antes do primeiro deploy real, é necessário provisionar o projeto Firebase de produção e adicionar seu alias/ID — isso está fora do escopo deste scaffold de CI/CD (nenhum recurso de nuvem real foi criado por este agente).
-3. Vá em GitHub > Actions > workflow **"Deploy Firebase Functions"** > "Run workflow", selecione a branch `main`, digite `deploy` no campo de confirmação e execute.
-4. O workflow reexecuta lint + build + testes antes de deployar (defesa em profundidade) e então roda `firebase deploy --only functions`.
+2. Vá em GitHub > Actions > workflow **"Deploy Firebase Functions"** > "Run workflow", selecione a branch `main`, digite `deploy` no campo de confirmação e execute.
+3. O workflow reexecuta lint + build + testes antes de deployar (defesa em profundidade) e então roda `firebase deploy --only functions`.
 
-### Deploy manual via Firebase CLI (local, alternativa)
-
-Use apenas se você tiver credenciais próprias autorizadas no projeto Firebase real (via `firebase login`):
+### Deploy manual via Firebase CLI (local)
 
 ```bash
 cd functions
 npm run build
 npm run test:emulator          # garanta que a suíte passa antes de deployar
 cd ..
-npx firebase-tools use production   # alias configurado em .firebaserc, ver acima
-npx firebase-tools deploy --only functions
+npx firebase-tools deploy --only functions --project production
 ```
 
 Nunca rode `firebase deploy` apontando para o alias `default`/demo — ele existe apenas para os emuladores.
