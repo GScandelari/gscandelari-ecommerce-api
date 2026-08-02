@@ -43,7 +43,8 @@ emulator-data/
 functions/.runtimeconfig.json
 .secrets/
 
-# === Editor / OS ===
+# === Editor / OS / agente local ===
+.claude/settings.json
 .vscode/
 .idea/
 *.swp
