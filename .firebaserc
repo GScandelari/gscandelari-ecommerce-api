@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "demo-gscandelari-ecommerce-api"
+    "default": "demo-gscandelari-ecommerce-api",
+    "production": "gscandelari-ecommerce-api"
   }
 }
