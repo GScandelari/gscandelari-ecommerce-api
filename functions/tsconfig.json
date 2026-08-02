@@ -6,6 +6,10 @@
     "moduleResolution": "node",
     "outDir": "lib",
     "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

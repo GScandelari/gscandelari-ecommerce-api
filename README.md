@@ -8,12 +8,11 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 
 ## Estado atual do projeto
 
-Este repositório está em desenvolvimento incremental (TDD/BDD), e o estado abaixo é esperado — não é um bug:
-
-- **Módulo 1 (Setup & Infra)**: parcialmente concluído. `firebase.json`, `.firebaserc`, `firestore.rules` (deny-all para client SDK), Firestore/Auth/Functions Emulator, TypeScript e um app Express mínimo (`GET /health`) já existem. **ESLint/Prettier (Task 1.3.1) ainda não foram configurados** — o script `npm run lint` (e o step de lint do CI) falharão até essa task ser concluída.
-- **Módulo 2 (Core Business)**: **ainda não implementado.** Modelos de dados, middlewares de autenticação/autorização, endpoints de `/produtos` e `/pedidos`, validação Zod e tratamento de erro centralizado são a próxima etapa. Até lá, qualquer rota além de `/health` responde `404`.
-- **Módulo 3 (Testes)**: a suíte Jest + Supertest já existe em `functions/test/` e roda contra o Firebase Emulator Suite, mas está **majoritariamente "vermelha" (falhando) por design** — TDD: os testes foram escritos antes da implementação do Módulo 2 e falham porque os módulos que eles importam (`src/middlewares/authenticate`, `src/services/pedidos.statusMachine`, etc.) ainda não existem. Isso é o estado esperado nesta fase, não uma regressão.
-- **Módulo 4 (este documento + CI/CD)**: cobre a infraestrutura de entrega (Git, CI, README, deploy) e pode evoluir em paralelo aos demais módulos.
+- **Módulo 1 (Setup & Infra)**: concluído. `firebase.json`, `.firebaserc`, `firestore.rules` (deny-all para client SDK), Firestore/Auth/Functions Emulator, TypeScript (com path alias `@/`), ESLint + Prettier e hook de pre-commit já configurados.
+- **Módulo 2 (Core Business)**: concluído. Modelos de dados, middlewares de autenticação/autorização (Firebase Auth + custom claim `admin`), validação Zod, tratamento de erro centralizado e os endpoints REST de `/produtos` e `/pedidos` (RN01-RN09, RN07a) estão implementados.
+- **Módulo 3 (Testes)**: concluído. `functions/test/` cobre RN01-RN09/RN07a via Jest + Supertest contra o Firebase Emulator Suite — **48/48 testes passando**, cobertura 96%+ (acima da meta de 70% do `SPEC.md`).
+- **Módulo 4 (este documento + CI/CD)**: concluído. Git, CI/CD, README e estratégia de deploy documentados.
+- Pendente (não bloqueante para a Fase 1 funcionar): Épico 2.7 (documentação OpenAPI/Swagger em `/docs`).
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -119,14 +118,15 @@ npm run test:coverage
 npm run test:coverage:emulator
 ```
 
-**Resultado esperado hoje:** `test:emulator` roda a suíte completa, mas falha (ver seção "Estado atual do projeto" acima) porque o Módulo 2 ainda não foi implementado — isso é o estado "vermelho" esperado em TDD, não um problema deste scaffold de CI/CD. Conforme o Módulo 2 for implementado, os testes progressivamente ficam verdes.
+**Resultado esperado hoje:** `test:emulator` roda a suíte completa e passa (48/48), com cobertura acima da meta de 70% definida no `SPEC.md`.
 
 ## Lint e build
 
 ```bash
 cd functions
-npm run build   # compila TypeScript (tsconfig.build.json) para functions/lib
-npm run lint     # ainda não configurado nesta fase — ver "Estado atual do projeto"
+npm run build         # compila TypeScript (tsconfig.build.json) + resolve o path alias @/ via tsc-alias
+npm run lint           # ESLint (flat config, typescript-eslint)
+npm run format:check   # Prettier (use `npm run format` para corrigir)
 ```
 
 ## Estrutura do projeto
@@ -143,9 +143,18 @@ npm run lint     # ainda não configurado nesta fase — ver "Estado atual do pr
 ├── .github/workflows/         # pipelines de CI (lint+testes) e CD (deploy manual)
 └── functions/                 # todo o código da API (Cloud Functions)
     ├── src/
-    │   ├── app.ts              # app Express (hoje: só GET /health)
+    │   ├── app.ts              # app Express (GET /health + /produtos + /pedidos + error handler)
     │   ├── index.ts             # entry point da Cloud Function HTTPS 2ª geração
-    │   └── ...                  # routes/, models/, middlewares/, services/, repositories/ — Módulo 2
+    │   ├── routes/               # produtos.routes.ts, pedidos.routes.ts
+    │   ├── services/              # pedidosService.ts (transações Firestore), pedidos.statusMachine.ts
+    │   ├── repositories/           # produtosRepository.ts, pedidosRepository.ts
+    │   ├── middlewares/             # authenticate, requireAdmin, validate, errorHandler
+    │   ├── schemas/                  # schemas Zod de Produto/Pedido
+    │   ├── models/                    # interfaces Produto, Pedido
+    │   ├── errors/                     # AppError e subclasses (NotFound/Forbidden/Validation/Conflict)
+    │   ├── types/                       # augmentation de Express.Request (req.user)
+    │   └── firebaseAdmin.ts              # singleton do Admin SDK (emulator-aware)
+    ├── scripts/setAdminClaim.js  # utilitario de dev: seta custom claim admin no Auth Emulator
     ├── test/
     │   ├── setup/                # sanity checks de infra de teste
     │   ├── unit/                  # testes unitários (middlewares, máquina de status)
@@ -169,7 +178,7 @@ Workflows em `.github/workflows/`:
 
 O deploy para o projeto Firebase real a partir de `main` é **manual**, disparado via `workflow_dispatch` (botão "Run workflow" no GitHub Actions, com um campo de confirmação obrigatório), e **não** automático a cada merge em `main`.
 
-**Motivo:** este é um projeto de portfólio rodando sobre um projeto Firebase real no plano Blaze (pré-requisito das Cloud Functions 2ª geração). Deploy automático a cada merge geraria risco/custo desnecessário enquanto o Módulo 2 (Core Business) ainda está em desenvolvimento incremental e a suíte de testes ainda não está 100% verde. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo ainda assim `main` sempre *deployável* (princípio central do GitHub Flow) e o pipeline de deploy 100% automatizado/reprodutível uma vez disparado. Essa decisão pode ser revisitada (trocando o gatilho para `push` em `main`) quando o projeto amadurecer.
+**Motivo:** este é um projeto de portfólio rodando sobre um projeto Firebase real no plano Blaze (pré-requisito das Cloud Functions 2ª geração). Ainda não existe projeto Firebase de produção provisionado (ver "gap conhecido" abaixo), então deploy automático a cada merge não teria sequer onde apontar hoje. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo ainda assim `main` sempre *deployável* (princípio central do GitHub Flow) e o pipeline de deploy 100% automatizado/reprodutível uma vez disparado. Essa decisão pode ser revisitada (trocando o gatilho para `push` em `main`) quando o projeto de produção estiver provisionado e o time preferir deploy contínuo.
 
 ### Deploy manual via GitHub Actions (recomendado)
 

@@ -5,6 +5,11 @@ module.exports = {
   rootDir: ".",
   roots: ["<rootDir>/test"],
   testMatch: ["**/*.test.ts"],
+  // Resolve o path alias @/ (Task 1.3.3) tambem no ts-jest, sem precisar de
+  // outDir (ts-jest roda direto sobre src/**/*.ts via require hook).
+  moduleNameMapper: {
+    "^@/(.*)$": "<rootDir>/src/$1",
+  },
   // Timeout maior: testes de integração falam com o Auth/Firestore Emulator.
   testTimeout: 20000,
   collectCoverage: false,

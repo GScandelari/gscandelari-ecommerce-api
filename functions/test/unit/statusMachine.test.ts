@@ -10,6 +10,14 @@ describe("Maquina de estados de status do Pedido - RN05 (Task 2.6.1 / 3.3.4)", (
     ["confirmado", "enviado"],
     ["enviado", "entregue"],
     ["pendente", "cancelado"],
+    // RN05 (SPEC.md) foi emendada apos o relatorio do qa-negocio: a
+    // maquina de estados estrutural e agnostica de papel, entao cancelado
+    // e alcancavel tambem a partir de confirmado/enviado. Quem pode
+    // efetivamente disparar cada transicao (cliente so a partir de
+    // pendente, admin a partir de qualquer uma destas tres) e decidido na
+    // camada de rota/servico (RN06/RN07/RN07a), nao aqui.
+    ["confirmado", "cancelado"],
+    ["enviado", "cancelado"],
   ];
 
   it.each(validTransitions)("RN05: %s -> %s deve ser valida", (from, to) => {
@@ -30,23 +38,4 @@ describe("Maquina de estados de status do Pedido - RN05 (Task 2.6.1 / 3.3.4)", (
   it.each(invalidTransitions)("RN05: %s -> %s deve ser invalida", (from, to) => {
     expect(isValidTransition(from, to)).toBe(false);
   });
-
-  // GAP DE ESPECIFICACAO (sinalizado no relatorio do agente qa-negocio):
-  // o criterio de aceite da Task 2.6.1, lido literalmente, lista como
-  // unica transicao de cancelamento valida "pendente -> cancelado". Porem
-  // RN07/RN07a exigem que um Admin consiga cancelar pedidos em
-  // "confirmado" ou "enviado" (a diferenca e apenas se o estoque e
-  // restaurado ou nao). Ou seja, `isValidTransition("confirmado",
-  // "cancelado")` e `isValidTransition("enviado", "cancelado")` deveriam
-  // provavelmente retornar `true` quando avaliados no contexto de um
-  // Admin, mas a assinatura da funcao pura descrita na Task 2.6.1 nao
-  // recebe o papel do usuario como parametro. Por isso, NENHUMA asserção
-  // sobre esses dois casos foi incluída aqui (nem como válida nem como
-  // inválida) - decisão deliberadamente deixada em aberto para quem
-  // implementar o Módulo 2, que precisará decidir entre (a) adicionar um
-  // parâmetro de papel/contexto a `isValidTransition`, ou (b) tratar o
-  // cancelamento por Admin fora de `pendente` como uma regra à parte na
-  // camada de rota (Task 2.6.5), sem passar por esta função pura.
-  // O comportamento observável do endpoint (RN07a) É coberto e travado
-  // pelos testes de integração em test/integration/pedidos.test.ts.
 });

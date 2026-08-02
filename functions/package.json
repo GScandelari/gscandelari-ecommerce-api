@@ -8,10 +8,11 @@
   },
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "set-admin": "node scripts/setAdminClaim.js",
     "test": "jest --runInBand",
     "test:coverage": "jest --coverage --runInBand",
     "test:emulator": "npx firebase-tools emulators:exec --only auth,firestore --project demo-gscandelari-ecommerce-api \"npm test\"",
@@ -37,6 +38,7 @@
     "jest": "^29.7.0",
     "prettier": "^3.3.3",
     "supertest": "^7.0.0",
+    "tsc-alias": "^1.8.10",
     "ts-jest": "^29.2.5",
     "typescript": "^5.5.4",
     "typescript-eslint": "^8.13.0"
