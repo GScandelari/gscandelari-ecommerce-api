@@ -31,7 +31,7 @@ Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de
 
 - [Node.js 20](https://nodejs.org/) (mesma versão declarada em `functions/package.json` > `engines.node` e usada pelo runtime das Cloud Functions)
 - npm (instalado junto com o Node.js)
-- Java 11+ (exigido pelo Firestore/Auth Emulator — verifique com `java -version`)
+- Java 21+ (exigido pelo Firestore/Auth Emulator na versão atual do `firebase-tools` — verifique com `java -version`)
 - Não é necessário instalar o Firebase CLI globalmente: ele é uma devDependency do projeto (`firebase-tools`, em `functions/package.json`) e é usado via `npx firebase-tools` nos scripts do `npm` e no CI. Se preferir usar um CLI global (`npm install -g firebase-tools`), ele também funciona.
 
 ## Como rodar localmente
