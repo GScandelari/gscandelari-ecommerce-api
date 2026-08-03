@@ -1,17 +1,26 @@
 /**
- * Mocka o pacote real `google-auth-library` (duplicado de
- * services/orders/test/helpers/mockGoogleAuthLibrary.ts, conforme a Decisao
- * tecnica 4 do BACKLOG) para os dois lados da autenticacao servico-a-servico
- * em Payments (RN18):
+ * Mocka o pacote real `google-auth-library` (instalado como dependencia de
+ * producao, nao um modulo virtual) para os dois lados da autenticacao
+ * servico-a-servico (RN18):
  *
- * - Lado emissor (`mintInternalToken`, Task 9.1.1): usado ao chamar os
- *   endpoints internos de Orders (`orders.internalClient.ts`, Task 9.3.2).
- * - Lado receptor (`verifyInternalToken`, Task 9.1.2): usado por
- *   `POST /internal/payment-intents` (Task 9.2.1), chamado por Orders.
+ * - Lado emissor (`mintInternalToken`, Task 9.1.1): `GoogleAuth().getIdTokenClient(audience).fetchIdToken(audience)`.
+ * - Lado receptor (`verifyInternalToken`, Task 9.1.2): `new OAuth2Client().verifyIdToken({ idToken, audience })`.
+ *
+ * Sem este mock, os testes dependeriam do metadata server do GCP (que nao
+ * existe no Emulator Suite nem neste ambiente de teste local) para emitir/
+ * validar tokens reais - por isso RN18 e testada inteiramente com o SDK
+ * mockado, nunca contra credenciais/rede reais (mesmo espirito do mock do
+ * Stripe na Fase 2).
  */
 
 export const mockFetchIdToken = jest.fn();
-export const mockGetIdTokenClient = jest.fn(() => ({ fetchIdToken: mockFetchIdToken }));
+// Forma real do IdTokenClient do google-auth-library: fetchIdToken vive em
+// `client.idTokenProvider.fetchIdToken(audience)`, nao diretamente no
+// client (IdTokenClient nao expoe fetchIdToken publico - ver
+// node_modules/google-auth-library/build/src/auth/idtokenclient.d.ts).
+export const mockGetIdTokenClient = jest.fn(() => ({
+  idTokenProvider: { fetchIdToken: mockFetchIdToken },
+}));
 export const mockVerifyIdToken = jest.fn();
 
 jest.mock("google-auth-library", () => {
@@ -31,6 +40,8 @@ jest.mock("google-auth-library", () => {
 export function resetGoogleAuthLibraryMocks(): void {
   mockFetchIdToken.mockReset();
   mockGetIdTokenClient.mockReset();
-  mockGetIdTokenClient.mockImplementation(() => ({ fetchIdToken: mockFetchIdToken }));
+  mockGetIdTokenClient.mockImplementation(() => ({
+    idTokenProvider: { fetchIdToken: mockFetchIdToken },
+  }));
   mockVerifyIdToken.mockReset();
 }

@@ -1,8 +1,12 @@
 // Estes imports DEVEM vir antes de `../../src/app` para que os mocks virtuais
 // sejam registrados antes de qualquer modulo do Modulo 9 tentar carregar o
-// cliente HTTP interno real ou a `google-auth-library` real.
+// cliente HTTP interno real. Usa mockVerifyInternalToken (mock da fronteira
+// @/middlewares/verifyInternalToken), NAO mockGoogleAuthLibrary - este
+// arquivo tambem exercita Firestore real via pedidosService, e mockar o
+// pacote `google-auth-library` inteiro quebraria a autenticacao interna do
+// proprio Admin SDK do Firestore (ver comentario em mockVerifyInternalToken.ts).
 import { mockCriarPaymentIntent, resetPaymentsInternalClientMocks } from "../helpers/mockPaymentsInternalClient";
-import { mockVerifyIdToken, resetGoogleAuthLibraryMocks } from "../helpers/mockGoogleAuthLibrary";
+import { resetMockVerifyInternalToken, setInternalTokenValido } from "../helpers/mockVerifyInternalToken";
 import request from "supertest";
 import app from "../../src/app";
 import { createTestUser, TestUser } from "../helpers/testAuth";
@@ -21,9 +25,6 @@ import { getAdminApp } from "../helpers/adminApp";
  *
  * Requer Auth + Firestore Emulator rodando (`npm run test:emulator`).
  */
-
-const SELF_URL = "https://orders-api-xyz.a.run.app";
-const CALLER_EMAIL = "payments-runtime@demo-gscandelari-ecommerce-api.iam.gserviceaccount.com";
 
 async function criarProduto(
   adminUser: TestUser,
@@ -70,9 +71,7 @@ async function lerEstoqueDireto(produtoId: string): Promise<number | undefined> 
 }
 
 function tokenValidoDePayments() {
-  mockVerifyIdToken.mockResolvedValue({
-    getPayload: () => ({ aud: SELF_URL, email: CALLER_EMAIL }),
-  });
+  setInternalTokenValido(true);
 }
 
 describe("Endpoints internos de Orders (chamados por Payments) - RN17, RN18 (Modulo 12 - Epico 12.2)", () => {
@@ -87,9 +86,7 @@ describe("Endpoints internos de Orders (chamados por Payments) - RN17, RN18 (Mod
 
   beforeEach(() => {
     resetPaymentsInternalClientMocks();
-    resetGoogleAuthLibraryMocks();
-    process.env.SELF_BASE_URL = SELF_URL;
-    process.env.ALLOWED_CALLER_SERVICE_ACCOUNT_EMAIL = CALLER_EMAIL;
+    resetMockVerifyInternalToken();
   });
 
   afterEach(async () => {

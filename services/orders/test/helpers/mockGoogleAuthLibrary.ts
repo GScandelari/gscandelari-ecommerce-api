@@ -14,7 +14,13 @@
  */
 
 export const mockFetchIdToken = jest.fn();
-export const mockGetIdTokenClient = jest.fn(() => ({ fetchIdToken: mockFetchIdToken }));
+// Forma real do IdTokenClient do google-auth-library: fetchIdToken vive em
+// `client.idTokenProvider.fetchIdToken(audience)`, nao diretamente no
+// client (IdTokenClient nao expoe fetchIdToken publico - ver
+// node_modules/google-auth-library/build/src/auth/idtokenclient.d.ts).
+export const mockGetIdTokenClient = jest.fn(() => ({
+  idTokenProvider: { fetchIdToken: mockFetchIdToken },
+}));
 export const mockVerifyIdToken = jest.fn();
 
 jest.mock("google-auth-library", () => {
@@ -34,6 +40,8 @@ jest.mock("google-auth-library", () => {
 export function resetGoogleAuthLibraryMocks(): void {
   mockFetchIdToken.mockReset();
   mockGetIdTokenClient.mockReset();
-  mockGetIdTokenClient.mockImplementation(() => ({ fetchIdToken: mockFetchIdToken }));
+  mockGetIdTokenClient.mockImplementation(() => ({
+    idTokenProvider: { fetchIdToken: mockFetchIdToken },
+  }));
   mockVerifyIdToken.mockReset();
 }
