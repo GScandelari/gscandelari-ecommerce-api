@@ -33,7 +33,7 @@ jest.mock(
   () => ({
     verifyInternalToken: (req: Request, res: Response, next: NextFunction) => {
       const header = req.headers.authorization;
-      if (!header || !header.startsWith("Bearer ")) {
+      if (!header?.startsWith("Bearer ")) {
         res
           .status(401)
           .json({ error: { code: "UNAUTHENTICATED", message: "Token interno ausente." } });

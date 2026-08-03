@@ -29,7 +29,7 @@ export async function verifyInternalToken(
 
   const header = req.headers.authorization;
 
-  if (!header || !header.startsWith(BEARER_PREFIX)) {
+  if (!header?.startsWith(BEARER_PREFIX)) {
     res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Token interno ausente." } });
     return;
   }

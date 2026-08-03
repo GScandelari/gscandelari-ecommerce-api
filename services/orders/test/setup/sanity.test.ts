@@ -9,7 +9,8 @@ import app from "../../src/app";
  */
 describe("Infra de testes", () => {
   it("Task 3.1.1: Jest + ts-jest executam um teste trivial de sanidade", () => {
-    expect(1 + 1).toBe(2);
+    const soma = (a: number, b: number): number => a + b;
+    expect(soma(1, 1)).toBe(2);
   });
 
   it("Task 3.1.2 / 1.2.3: GET /health via Supertest retorna 200 e expõe APP_ENV", async () => {

@@ -10,7 +10,7 @@ const BEARER_PREFIX = "Bearer ";
 export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
 
-  if (!header || !header.startsWith(BEARER_PREFIX)) {
+  if (!header?.startsWith(BEARER_PREFIX)) {
     res
       .status(401)
       .json({ error: { code: "UNAUTHENTICATED", message: "Token de autenticacao ausente." } });
