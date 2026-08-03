@@ -12,6 +12,17 @@ const BEARER_PREFIX = "Bearer ";
  * Duplicado identico em Orders e Payments.
  */
 export async function verifyInternalToken(req: Request, res: Response, next: NextFunction): Promise<void> {
+  // Task 9.1.5: conveniencia de dev - o metadata server do GCP (usado por
+  // mintInternalToken/verifyIdToken) nao existe no Emulator Suite. Dupla
+  // trava de seguranca: so tem efeito se SKIP_INTERNAL_AUTH=true E
+  // FUNCTIONS_EMULATOR=true (setado automaticamente pelo proprio Firebase
+  // SOMENTE no emulator, nunca numa function deployada de verdade) - mesmo
+  // que a env var vaze para producao por engano, nunca ha bypass real.
+  if (process.env.SKIP_INTERNAL_AUTH === "true" && process.env.FUNCTIONS_EMULATOR === "true") {
+    next();
+    return;
+  }
+
   const header = req.headers.authorization;
 
   if (!header || !header.startsWith(BEARER_PREFIX)) {
