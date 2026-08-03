@@ -16,23 +16,9 @@ export class ValidationError extends AppError {
   }
 }
 
-export class ForbiddenError extends AppError {
-  constructor(message = "Acesso negado.") {
-    super(403, "FORBIDDEN", message);
-  }
-}
-
-export class NotFoundError extends AppError {
-  constructor(message = "Recurso nao encontrado.") {
-    super(404, "NOT_FOUND", message);
-  }
-}
-
-export class ConflictError extends AppError {
-  constructor(message = "Conflito de estado.") {
-    super(409, "CONFLICT", message);
-  }
-}
+// Payments so lanca ValidationError/PaymentGatewayError - NotFoundError/
+// ForbiddenError/ConflictError (usadas em Orders) nao se aplicam aqui,
+// entao nao sao duplicadas (evita codigo morto/nao coberto por teste).
 
 export class PaymentGatewayError extends AppError {
   constructor(message = "Erro no gateway de pagamento.") {
