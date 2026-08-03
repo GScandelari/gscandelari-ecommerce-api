@@ -3,8 +3,11 @@ node_modules/
 functions/node_modules/
 
 # === Build / artefatos compilados ===
-lib/
+# Anexado ao caminho a partir da raiz do repo (nunca `lib/` puro - isso
+# tambem casaria com pastas de codigo-fonte legitimas como web/src/lib/,
+# bug ja causado uma vez: ver commit de correcao na Fase 4).
 functions/lib/
+services/*/lib/
 dist/
 build/
 
