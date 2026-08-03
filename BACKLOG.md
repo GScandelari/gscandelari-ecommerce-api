@@ -553,3 +553,242 @@ Os Requisitos de DevOps & Doc da Fase 3 (seção 4 da spec): novo segredo `RESEN
 ### Bloqueios (a levar de volta ao agente clarificador)
 
 Nenhum bloqueio de negócio identificado nesta rodada. Todas as questões levantadas durante o planejamento eram de natureza técnica/arquitetural (mecanismo exato de emissão/validação de ID token Google em Cloud Functions 2ª geração; fronteira de extração do código Stripe e simplificação do contrato entre Orders e Payments; decisão de duplicar vs. compartilhar utilitários pequenos; sequência de corte de produção sem downtime; forma de resolver o e-mail do cliente em Notifications sem duplicar dado no modelo `Pedido`; semântica de retry quando a chamada interna Payments→Orders falha) e foram resolvidas e documentadas na seção "Decisões técnicas registradas nesta rodada" acima, sem necessidade de reabrir RN16-RN20.
+
+---
+
+## Backlog: gscandelari-ecommerce-api — Fase 4 (Front-end de testes)
+
+> Gerado a partir de SPEC.md, seção "Fase 4". Fragmenta os Módulos 13-17 (seção 3 da Fase 4) em épicos e tasks técnicas pequenas, testáveis de forma independente. Nenhuma regra de negócio (RN21-RN27) foi reaberta ou reinterpretada além do necessário para viabilizar a implementação. Diferente das Fases 2 e 3, `web/` **ainda não existe no filesystem** — todas as tasks abaixo estão pendentes (`[ ]`), nenhuma foi implementada. O front-end consome exclusivamente a API do monólito Fase 1+2 (`functions/`) rodando no Emulator Suite (`http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api`); os serviços da Fase 3 (`services/orders`, `services/payments`, `services/notifications`) não são consumidos nesta fase (ainda sem deploy real, e a spec da Fase 4 aponta explicitamente para o codebase `default`).
+
+### Decisões técnicas registradas nesta rodada (não são bloqueios, não requerem o clarificador)
+
+1. **Estrutura de pastas de `web/src/`.** Organização por responsabilidade (não por feature), para manter os fluxos de Cliente/Admin fáceis de navegar num app pequeno:
+   ```
+   web/src/
+     main.tsx                 # bootstrap (React + AuthProvider + Router)
+     App.tsx
+     routes/
+       AppRouter.tsx           # definição de rotas
+       ProtectedRoute.tsx       # exige usuário autenticado
+       AdminRoute.tsx           # exige isAdmin === true
+     pages/                    # componentes de rota (Login, Signup, Catalog, Checkout, Orders, OrderDetail, AdminProducts, AdminOrders, AdminOrderDetail)
+     components/                # UI reutilizável (Navbar, ProductCard, OrderStatusBadge, ConfirmDialog, ErrorBanner, PaymentForm)
+     context/                   # AuthContext, CartContext
+     api/                       # apiClient.ts (fino) + produtos.ts + pedidos.ts (funções tipadas por endpoint)
+     lib/                       # firebase.ts (Auth Emulator), stripe.ts (stripePromise)
+     types/                     # Produto, Pedido, ItemPedido, StatusPedido, ApiError — espelham functions/src/openapi.json
+     utils/
+   ```
+   Testes ficam co-localizados (`Componente.test.tsx` ao lado do componente), padrão Vitest/RTL idiomático — evita uma pasta `test/` paralela que se desalinha da estrutura de páginas/componentes conforme o app cresce.
+
+2. **Cliente HTTP fino — tratamento de erro consistente (`src/api/apiClient.ts`).** Um único `request<T>(path, options)`:
+   - Injeta `Authorization: Bearer <idToken>` automaticamente via um *token provider* fornecido pelo `AuthContext` (nunca lê `localStorage`/estado global solto — o token vem sempre de `auth.currentUser`).
+   - Toda resposta não-2xx é traduzida numa classe única `ApiError extends Error` com `{ status, code, message }`. Se o corpo bater no formato já conhecido do backend (`{ error: { code, message } }` — mesmo padrão usado desde a Fase 1, Task 2.4.1), `code`/`message` vêm dali (as mensagens do backend já são pensadas para usuário final: "Estoque insuficiente", "Transição de status inválida", etc.). Se o corpo não for esse formato (ex. erro genérico do Hosting/emulador, HTML de erro), cai num mapa de mensagens padrão por status HTTP (400/401/403/404/409/502/500).
+   - Falha de rede (`fetch` rejeita — emulador não está rodando) é normalizada como `ApiError(status: 0, message: "Não foi possível conectar à API. Verifique se o Firebase Emulator Suite está rodando (firebase emulators:start).")` — mensagem específica do caráter "ferramenta de teste local" desta fase (RN27).
+   - Tratamento especial de 401: uma única tentativa de `getIdToken(/* forceRefresh */ true)` + replay da requisição (cobre o caso comum de token expirado em sessão longa); se o replay também falhar com 401, `apiClient` dispara `signOut()` via o token provider e propaga o `ApiError` (token realmente inválido/revogado, não adianta insistir).
+   - Nenhum componente de UI chama `fetch` diretamente — todas as chamadas passam por `src/api/produtos.ts`/`src/api/pedidos.ts`, funções tipadas 1:1 com os endpoints documentados em `functions/src/openapi.json`.
+
+3. **`AuthContext` e o claim de admin — `getIdTokenResult()`, não decodificação manual do JWT.** Decisão: usar `user.getIdTokenResult()` do SDK oficial (nunca `jwt-decode` ou parsing manual de base64) — é a API suportada pelo Firebase para ler custom claims, já lida com cache/expiração corretamente. Comportamento:
+   - Em cada mudança de `onAuthStateChanged`, o contexto chama `getIdTokenResult()` e deriva `isAdmin = claims.admin === true`.
+   - Logo após login/cadastro bem-sucedido, força `getIdTokenResult(/* forceRefresh */ true)` uma vez, para refletir uma claim setada pouco antes via `functions/scripts/setAdminClaim.js`.
+   - Expõe `refreshClaims()` publicamente no contexto, para o caso de um admin ser promovido **durante** uma sessão já aberta (o token em cache do SDK só se atualiza sozinho a cada renovação automática, ~1h) — documentado no README (Task 17.4.1) que promover um usuário exige rodar o script e então logar novamente ou chamar essa função.
+   - `apiClient` usa `getIdToken()` (sem forçar refresh a cada requisição) para não gerar uma chamada de rede extra por request; o único ponto de refresh forçado por padrão é o pós-login/cadastro e o retry de 401 (decisão 2).
+
+4. **Integração exata com `@stripe/stripe-js`/`@stripe/react-stripe-js`.** Fluxo de PaymentIntent (não Checkout Session, herdado da decisão da Fase 2):
+   - `stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY)`, um singleton carregado uma única vez em `src/lib/stripe.ts`.
+   - `<Elements stripe={stripePromise}>` só é montado **depois** que `POST /pedidos` responde com sucesso e `paymentClientSecret` existe — nunca antes (evita montar o SDK do Stripe prematuramente, e evita ambiguidade de "para qual pedido é esse Elements").
+   - Dentro do `Elements`, um único `<CardElement>` (Card Element clássico, não Payment Element — mais simples para o caso de uso de teste/demonstração com um único método de pagamento, cartão) dentro de `PaymentForm`, que usa os hooks `useStripe()`/`useElements()`.
+   - Confirmação: `stripe.confirmCardPayment(paymentClientSecret, { payment_method: { card: elements.getElement(CardElement) } })`. Em sucesso (`paymentIntent.status === 'succeeded'`), UI mostra confirmação e link para "Meus Pedidos"; em erro, exibe `result.error.message` (mensagem já amigável, gerada pelo próprio Stripe.js para cartões de teste, ex. cartão recusado `4000 0000 0000 0002`).
+   - Nuance documentada explicitamente (não é bloqueio, é comportamento esperado do sistema): a confirmação do pagamento no front-end (Stripe) e a transição do **status do pedido** para `confirmado` (RN12, Fase 2) são coisas distintas — a segunda só ocorre quando o webhook `POST /webhooks/stripe` é efetivamente entregue. Como o Emulator Suite roda em `localhost`, isso só acontece localmente se o Stripe CLI estiver encaminhando eventos (`stripe listen --forward-to .../webhooks/stripe`) — documentado na Task 17.4.2. Sem esse passo, o pagamento aparece confirmado no Stripe mas o pedido permanece `pendente` até um Admin alterar o status manualmente (RN25) — comportamento correto e esperado da ferramenta de teste, não um bug.
+
+5. **Carrinho de compras em memória, não persistido.** `CartContext` guarda os itens do pedido em construção só em estado React (sem `localStorage`/`sessionStorage`) — a spec descreve "montar um pedido e criá-lo" como um fluxo de uma sessão só; persistência entre reloads/abas está fora do escopo de uma ferramenta de teste local e adicionaria complexidade (sincronização com estoque real) sem benefício de demonstração.
+
+6. **Guarda contra conexão a um projeto Firebase real (base de RN27).** `src/lib/firebase.ts` só chama `initializeApp`/`connectAuthEmulator` se `VITE_FIREBASE_PROJECT_ID` começar com `demo-` (convenção do próprio Firebase Emulator Suite para projetos que nunca tocam infraestrutura real); caso contrário, lança erro e interrompe o boot da aplicação — trava em código, não só em documentação/convenção.
+
+### Ordem sugerida de execução (visão macro)
+
+1. **Módulo 13** (Setup) — pré-requisito de tudo. Ordem interna: 13.1 → 13.2 (paralelo) → 13.4 → 13.5.4 → 13.5.1-13.5.3; o Épico 13.3 (roteamento) começa aqui como esqueleto, mas só fecha de fato depois do Módulo 14 existir (`ProtectedRoute`/`AdminRoute` reais).
+2. **Módulo 14** (Autenticação) — depende de 13.1 e 13.4; fecha a integração do Épico 13.3.
+3. **Módulo 15** (Área do Cliente) e **Módulo 16** (Área do Admin) — podem rodar em paralelo entre si; ambos dependem do Módulo 14 completo e do Épico 13.5. Dentro do Módulo 15, ordem interna 15.1 → 15.2 → 15.3.
+4. **Módulo 17** (Testes e documentação) — incremental (TDD) em paralelo a cada épico dos Módulos 14-16 conforme cada um fecha; o fechamento de rastreabilidade final (tabela RN21-RN27) e o README (Épico 17.4) só acontecem depois dos Módulos 14-16 completos.
+
+---
+
+### Módulo 13: Setup do projeto
+
+- **Épico 13.1: Scaffold do projeto**
+  - [ ] Task 13.1.1: Criar `web/` com `npm create vite@latest web -- --template react-ts` na raiz do monorepo; ajustar `package.json` (nome, scripts `dev`/`build`/`preview`/`lint`/`test`) (critério de aceite: `npm run dev` dentro de `web/` sobe o servidor Vite e a tela padrão renderiza sem erro)
+  - [ ] Task 13.1.2: Configurar ESLint + Prettier em `web/`, consistentes com as convenções já usadas em `functions/`/`services/` (critério de aceite: `npm run lint` roda sem erro no scaffold inicial; um arquivo propositalmente mal formatado é detectado)
+  - [ ] Task 13.1.3: Criar a estrutura de pastas de `web/src/` definida na Decisão técnica 1 (`routes/`, `pages/`, `components/`, `context/`, `api/`, `lib/`, `types/`, `utils/`), cada pasta com um `index.ts`/placeholder mínimo (critério de aceite: import relativo entre pastas resolve e compila; `npm run build` não falha por causa da estrutura vazia)
+  Dependências: nenhuma (ponto de partida da Fase 4).
+
+- **Épico 13.2: Estilo (Tailwind CSS)**
+  - [ ] Task 13.2.1: Instalar e configurar Tailwind CSS (`postcss`, `tailwind.config.ts`, diretivas em `index.css`) (critério de aceite: uma classe utilitária Tailwind aplicada a um elemento de teste produz o estilo esperado no navegador/no snapshot de teste)
+  Dependências: Épico 13.1.
+
+- **Épico 13.3: Roteamento**
+  - [ ] Task 13.3.1: Instalar `react-router-dom`; criar `AppRouter` com as rotas públicas (`/login`, `/cadastro`) e placeholders para as demais (`/`, `/pedidos`, `/pedidos/:id`, `/admin/produtos`, `/admin/pedidos`, `/admin/pedidos/:id`) (critério de aceite: navegar entre `/login` e `/cadastro` funciona sem reload de página)
+  - [ ] Task 13.3.2: Criar `ProtectedRoute` (exige usuário autenticado) e `AdminRoute` (exige `isAdmin`) como componentes de rota, consumindo o `AuthContext` do Módulo 14 — esqueleto pode ser escrito contra uma interface mockada de `AuthContext` antes do Módulo 14 existir de fato — implementa base de **RN26** (critério de aceite: acesso não autenticado a rota protegida redireciona para `/login`; usuário autenticado sem claim admin acessando rota `/admin/*` é redirecionado/bloqueado, nunca chega a renderizar o conteúdo admin)
+  Dependências: Épico 13.1; fechamento real de 13.3.2 depende do Épico 14.1.
+
+- **Épico 13.4: Cliente Firebase Auth (Emulator)**
+  - [ ] Task 13.4.1: Criar `src/lib/firebase.ts` inicializando `initializeApp` + `getAuth` + `connectAuthEmulator(auth, VITE_AUTH_EMULATOR_URL)`, com a trava de `projectId` iniciando em `demo-` descrita na Decisão técnica 6 — implementa base de **RN27** (critério de aceite: em dev, a aplicação conecta ao Auth Emulator, confirmável via log/console; alterar `VITE_FIREBASE_PROJECT_ID` para um valor sem prefixo `demo-` faz a inicialização lançar erro explícito e interromper o boot, não silenciosamente seguir em frente)
+  Dependências: Épico 13.1.
+
+- **Épico 13.5: Cliente HTTP fino para a API**
+  - [ ] Task 13.5.1: Criar `src/api/apiClient.ts` com `request<T>(path, options)`, implementando o tratamento de erro consistente da Decisão técnica 2 (critério de aceite: resposta 2xx retorna o JSON tipado; resposta de erro com corpo `{error:{code,message}}` lança `ApiError` populado a partir do corpo; corpo não reconhecível cai no mapa de mensagens por status HTTP; falha de `fetch`/rede lança `ApiError(status: 0)` com a mensagem orientando checar o Emulator Suite)
+  - [ ] Task 13.5.2: Integrar o *token provider* do `AuthContext` ao `apiClient` (header `Authorization` automático) e implementar o retry único de 401 com `getIdToken(true)` + replay, incluindo o `signOut()` disparado se o replay também falhar — Decisão técnica 2 e 3 (critério de aceite: requisição sem usuário logado não inclui header `Authorization`; com usuário logado, o header é injetado automaticamente; um 401 simulado no mock dispara exatamente uma tentativa de refresh+replay antes de desistir)
+  - [ ] Task 13.5.3: Criar `src/api/produtos.ts` e `src/api/pedidos.ts` com uma função tipada por endpoint (`listarProdutos`, `obterProduto`, `criarProduto`, `atualizarProduto`, `removerProduto`, `criarPedido`, `listarPedidos`, `obterPedido`, `alterarStatusPedido`, `cancelarPedido`), encapsulando `apiClient` — nenhum outro módulo chama `fetch` diretamente (critério de aceite: cada função tem assinatura tipada batendo com os schemas de `functions/src/openapi.json`; grep por `fetch(` no restante de `src/` não retorna nenhuma ocorrência fora de `apiClient.ts`)
+  - [ ] Task 13.5.4: Definir tipos TypeScript em `src/types/` espelhando os schemas do backend (`Produto`, `Pedido`, `ItemPedido`, `StatusPedido = 'pendente'|'confirmado'|'enviado'|'entregue'|'cancelado'`, `PaymentStatus`) a partir de `functions/src/openapi.json` (critério de aceite: tipos batem 1:1 com os schemas documentados; nenhum campo interno do backend não exposto pela API é replicado no front-end)
+  Dependências: Épico 13.1; Task 13.5.2 depende do Épico 14.1 para o token provider real (pode ser desenvolvida contra um stub até lá).
+
+---
+
+### Módulo 14: Autenticação
+
+> Implementa RN21 e RN26. Tabelas de rastreabilidade ao final de cada épico correspondente.
+
+- **Épico 14.1: `AuthContext`**
+  - [ ] Task 14.1.1: Criar `AuthContext`/`AuthProvider` com `onAuthStateChanged`, expondo `{ user, isAdmin, loading, signIn, signUp, signOut, refreshClaims }` (critério de aceite: consumidores do contexto recebem `loading: true` até o Firebase resolver o estado inicial de sessão, depois `loading: false` com `user`/`isAdmin` corretos)
+  - [ ] Task 14.1.2: Resolver `isAdmin` via `getIdTokenResult()` (Decisão técnica 3), com refresh forçado pós-login/cadastro e a função `refreshClaims()` pública — implementa base de **RN21** (critério de aceite: usuário sem custom claim → `isAdmin=false`; usuário com claim setada via `functions/scripts/setAdminClaim.js` **antes** do login → `isAdmin=true` já no primeiro carregamento; claim setada **depois** do login só reflete após `refreshClaims()` ou novo login, comportamento coberto por teste com o SDK mockado)
+  Dependências: Épico 13.4.
+
+- **Épico 14.2: Telas de login/cadastro — implementa RN21**
+  - [ ] Task 14.2.1: `LoginPage` com formulário (e-mail/senha) chamando `signInWithEmailAndPassword` via `AuthContext.signIn` — implementa **RN21** (critério de aceite: credenciais válidas → redireciona para `/`; credenciais inválidas → mensagem amigável derivada do código de erro do Firebase Auth, ex. `auth/invalid-credential` → "E-mail ou senha inválidos")
+  - [ ] Task 14.2.2: `SignupPage` com formulário chamando `createUserWithEmailAndPassword` via `AuthContext.signUp`, com login automático após cadastro — implementa **RN21** (critério de aceite: e-mail já cadastrado → mensagem amigável, `auth/email-already-in-use`; cadastro válido → usuário autenticado e redirecionado para `/`)
+  - [ ] Task 14.2.3: Botão/ação de logout (`AuthContext.signOut`) na navbar (critério de aceite: após logout, rotas antes acessíveis voltam a redirecionar para `/login`)
+  Dependências: Épico 14.1.
+
+- **Épico 14.3: Rotas protegidas — implementa RN26**
+  - [ ] Task 14.3.1: Fechar a integração real de `ProtectedRoute`/`AdminRoute` (Task 13.3.2) com o `AuthContext`, tratando explicitamente o estado `loading` para não haver "flash" de redirecionamento antes do Firebase confirmar a sessão — implementa **RN26** (critério de aceite: recarregar a página numa rota protegida com sessão válida não redireciona incorretamente para `/login` enquanto o estado de auth ainda está resolvendo)
+  - [ ] Task 14.3.2: Navbar/menu condicional: itens de admin (link para `/admin/*`) só são renderizados quando `isAdmin === true`; nada de admin é montado no DOM para clientes comuns — reforça explicitamente que **RN26** é só UX, a autorização real permanece no backend (critério de aceite: inspeção do DOM renderizado para um usuário não-admin confirma ausência total dos elementos/links de admin, não apenas `display:none`/classe oculta)
+  Dependências: Épicos 13.3, 14.1, 14.2.
+
+#### Rastreabilidade RN21, RN26 → Tasks (Módulo 14)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN21 | Cadastro e login de clientes via Firebase Auth contra o Auth Emulator | 13.4.1, 14.1.1, 14.1.2, 14.2.1, 14.2.2, 14.2.3 |
+| RN26 | UI de admin escondida para quem não tem o claim; backend é a fonte real de autorização | 13.3.2, 14.3.1, 14.3.2 |
+
+---
+
+### Módulo 15: Área do Cliente
+
+> Implementa RN22-RN24.
+
+- **Épico 15.1: Catálogo de produtos — implementa RN22**
+  - [ ] Task 15.1.1: `CatalogPage` consumindo `listarProdutos` (`GET /produtos`), exibindo nome/preço/estoque de cada produto — implementa **RN22** (critério de aceite: catálogo renderiza a lista retornada pela API; produto com `estoque: 0` é sinalizado visualmente e não fica selecionável para o carrinho)
+  - [ ] Task 15.1.2: Estados de carregamento e erro usando o `ApiError` do cliente HTTP (Decisão técnica 2) (critério de aceite: falha simulada na chamada exibe a mensagem de `ApiError`, nunca uma tela em branco ou um erro não tratado no console)
+  Dependências: Módulo 14 completo (usuário autenticado); Épico 13.5.
+
+- **Épico 15.2: Montagem, criação de pedido e pagamento — implementa RN23**
+  - [ ] Task 15.2.1: Instalar `@stripe/stripe-js` e `@stripe/react-stripe-js`; criar `src/lib/stripe.ts` com o `stripePromise` singleton (`loadStripe(VITE_STRIPE_PUBLISHABLE_KEY)`) — Decisão técnica 4 (critério de aceite: dependências instaladas e buildando; ausência/vazio de `VITE_STRIPE_PUBLISHABLE_KEY` falha de forma explícita e logada, não silenciosamente)
+  - [ ] Task 15.2.2: `CartContext` para montar o pedido (adicionar/remover item, ajustar quantidade, respeitando o estoque exibido no catálogo), carrinho em memória e não persistido — Decisão técnica 5 (critério de aceite: tentar adicionar quantidade além do estoque exibido é bloqueado na UI antes de qualquer chamada à API)
+  - [ ] Task 15.2.3: `CheckoutPage` com resumo do pedido e botão "Confirmar pedido" chamando `criarPedido` (`POST /pedidos`) — implementa parte de **RN23** (critério de aceite: sucesso → recebe `paymentClientSecret`/`id` e avança para a etapa de pagamento; 400 de estoque insuficiente, ex. condição de corrida com outro comprador → mensagem de erro específica, carrinho não é limpo automaticamente; 502 de falha ao criar o pagamento → mensagem de erro específica)
+  - [ ] Task 15.2.4: `PaymentForm` — `<Elements stripe={stripePromise}>` montado só após `paymentClientSecret` existir, `<CardElement>` + `useStripe()`/`useElements()`, chamando `stripe.confirmCardPayment(paymentClientSecret, { payment_method: { card: elements.getElement(CardElement) } })` — Decisão técnica 4, implementa **RN23** de ponta a ponta (critério de aceite: com o cartão de teste `4242 4242 4242 4242`, `confirmCardPayment` resolve com `status: 'succeeded'` e a UI exibe confirmação + link para "Meus Pedidos"; cartão de teste de recusa, ex. `4000 0000 0000 0002`, exibe `result.error.message` tal como retornado pelo Stripe.js)
+  - [ ] Task 15.2.5: Mensagem explícita na tela de confirmação de pagamento informando que o status do pedido só transiciona para `confirmado` quando o webhook local (Stripe CLI, Task 17.4.2) estiver configurado; caso contrário permanece `pendente` até ação manual do Admin — reflete a nuance documentada na Decisão técnica 4 (critério de aceite: mensagem visível na tela de sucesso do pagamento, sem bloquear o fluxo)
+  Dependências: Épico 15.1; Épico 13.5 (`criarPedido`).
+
+- **Épico 15.3: Histórico de pedidos e cancelamento — implementa RN24**
+  - [ ] Task 15.3.1: `OrdersPage` consumindo `listarPedidos` (`GET /pedidos`), exibindo status atual de cada pedido do cliente logado — implementa parte de **RN24** (critério de aceite: lista mostra exatamente os pedidos retornados pela API — o filtro por cliente já é feito pelo backend, RN08 — nenhuma lógica de filtro adicional no front-end)
+  - [ ] Task 15.3.2: `OrderDetailPage` consumindo `obterPedido` (`GET /pedidos/:id`) com itens/total/status/`paymentStatus` (critério de aceite: se a API retornar 403/404 mesmo assim — ex. link direto manipulado — a UI mostra mensagem amigável em vez de travar)
+  - [ ] Task 15.3.3: Botão "Cancelar pedido" visível somente quando `status === 'pendente'`, chamando `cancelarPedido` (`PATCH /pedidos/:id/cancelar`) — implementa **RN24** (critério de aceite: cancelamento bem-sucedido atualiza a UI para `cancelado` sem reload manual; o botão nunca é renderizado fora de `pendente` — reforço de UX consistente com RN26, autorização real continua no backend)
+  Dependências: Épico 15.1; Épico 13.5.
+
+#### Rastreabilidade RN22-RN24 → Tasks (Módulo 15)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN22 | Cliente autenticado visualiza o catálogo de produtos | 15.1.1, 15.1.2 |
+| RN23 | Cliente monta e cria pedido; completa pagamento via Stripe Elements com o `paymentClientSecret` | 15.2.1, 15.2.2, 15.2.3, 15.2.4, 15.2.5 |
+| RN24 | Cliente vê histórico dos próprios pedidos e cancela um pedido `pendente` | 15.3.1, 15.3.2, 15.3.3 |
+
+---
+
+### Módulo 16: Área do Admin
+
+> Implementa RN25.
+
+- **Épico 16.1: CRUD de Produtos**
+  - [ ] Task 16.1.1: `AdminProductsPage` listando produtos (reaproveita `listarProdutos`) com ações de editar/remover, acessível apenas via `AdminRoute` — implementa parte de **RN25** (critério de aceite: rota só acessível a `isAdmin === true`, confirmado por teste; lista exibe todos os produtos)
+  - [ ] Task 16.1.2: Formulário de criação/edição de produto (`nome`, `preco`, `estoque`) chamando `criarProduto`/`atualizarProduto`, com validação client-side mínima (obrigatoriedade, tipos, `estoque` inteiro ≥ 0) espelhando — sem duplicar como fonte de verdade — a validação Zod já existente no backend — implementa **RN25** (critério de aceite: submissão com dados inválidos é bloqueada na UI antes de chamar a API, com mensagem por campo; submissão válida atualiza a lista após o 200/201)
+  - [ ] Task 16.1.3: Confirmação explícita (modal/dialog) antes de chamar `removerProduto` (`DELETE /produtos/:id`) — implementa **RN25** (critério de aceite: remoção só ocorre após confirmação explícita do usuário; lista atualizada após o 204)
+  Dependências: Épico 14.3 (`AdminRoute`); Épico 13.5.
+
+- **Épico 16.2: Gestão de Pedidos**
+  - [ ] Task 16.2.1: `AdminOrdersPage` listando todos os pedidos (`listarPedidos` como admin já retorna todos, RN08 resolvido no backend) — implementa parte de **RN25** (critério de aceite: lista exibe pedidos de todos os clientes, sem filtro adicional no front-end)
+  - [ ] Task 16.2.2: `AdminOrderDetailPage` com seletor de novo status restrito, por UX, às transições estruturalmente válidas a partir do status atual (mesma máquina de estados de RN05, replicada como tabela estática só para a UI — a validação real permanece no backend, reforçando **RN26**) — implementa **RN25** (critério de aceite: para um pedido `enviado`, o seletor só oferece `entregue`/`cancelado`; uma chamada direta simulando contornar a UI ainda é rejeitada pelo backend com 400, confirmado por teste, evidenciando que a UI não é a fonte de verdade)
+  - [ ] Task 16.2.3: Chamada de `alterarStatusPedido` (`PATCH /pedidos/:id/status`) a partir do seletor, com feedback de sucesso/erro (400 de transição inválida tratado via `ApiError` genérico) — implementa **RN25** (critério de aceite: alteração bem-sucedida atualiza a UI sem reload manual; erro 400 exibe mensagem amigável sem quebrar a tela)
+  Dependências: Épico 14.3; Épico 13.5.
+
+#### Rastreabilidade RN25 → Tasks (Módulo 16)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN25 | Área exclusiva do Admin: CRUD de Produtos e gestão de Pedidos (listar, detalhar, alterar status) | 16.1.1, 16.1.2, 16.1.3, 16.2.1, 16.2.2, 16.2.3 |
+
+---
+
+### Módulo 17: Testes e documentação
+
+> Cobre RN21-RN27 (testes automatizados) e RN27 (verificação em código). Tabela de rastreabilidade consolidada ao final desta seção.
+
+- **Épico 17.1: Setup Vitest + React Testing Library**
+  - [ ] Task 17.1.1: Configurar Vitest (`vitest.config.ts`, ambiente `jsdom`) + `@testing-library/react` + `@testing-library/jest-dom` (critério de aceite: `npm test` roda um teste trivial de sanidade sem depender de emulador rodando ou de rede)
+  - [ ] Task 17.1.2: Helpers de mock reutilizáveis: `mockApiClient` (intercepta `apiClient.request`, sem `fetch` real) e mocks de `firebase/auth`/`AuthContext` para os 3 perfis (não-autenticado, cliente, admin) (critério de aceite: um teste de exemplo usando ambos os mocks passa sem subir o Firebase Emulator Suite)
+  Dependências: Módulo 13 (interfaces de `apiClient`/`AuthContext` já existentes, ao menos como contrato).
+
+- **Épico 17.2: Testes dos fluxos principais — cobre RN21-RN26**
+  - [ ] Task 17.2.1: Testes de `LoginPage`/`SignupPage` (sucesso e erros de credenciais, `firebase/auth` mockado) — cobre **RN21**
+  - [ ] Task 17.2.2: Testes de `ProtectedRoute`/`AdminRoute` (não-autenticado redirecionado; autenticado não-admin bloqueado de rota admin; admin acessa normalmente) — cobre **RN26**
+  - [ ] Task 17.2.3: Teste de `CatalogPage` (lista renderizada a partir do `mockApiClient`, incluindo o caso de produto sem estoque) — cobre **RN22**
+  - [ ] Task 17.2.4: Teste do fluxo de criação de pedido até a etapa de pagamento — `criarPedido` mockado retornando `paymentClientSecret`; `@stripe/react-stripe-js` mockado (`useStripe`/`useElements`) confirmando que `confirmCardPayment` é chamado com o `clientSecret` correto — cobre **RN23**
+  - [ ] Task 17.2.5: Teste de `OrdersPage`/cancelamento (lista renderizada; botão "Cancelar" ausente fora de `pendente`; `cancelarPedido` disparado ao clicar) — cobre **RN24**
+  - [ ] Task 17.2.6: Testes de `AdminProductsPage` (CRUD mockado via `apiClient`) e de `AdminOrderDetailPage` (seletor de status restrito por transição válida a partir de diferentes status atuais) — cobre **RN25**
+  Dependências: Épico 17.1; cada task depende do épico/módulo correspondente (14.x/15.x/16.x) já implementado.
+
+- **Épico 17.3: Verificação de RN27**
+  - [ ] Task 17.3.1: Teste unitário confirmando que `src/lib/firebase.ts` só inicializa quando `VITE_FIREBASE_PROJECT_ID` tem prefixo `demo-` — a mesma trava da Task 13.4.1, agora coberta por teste automatizado — cobre **RN27** (critério de aceite: teste alterando a env var para um `projectId` sem o prefixo `demo-` confirma que a inicialização lança erro, não segue silenciosamente)
+  Dependências: Épico 13.4.
+
+- **Épico 17.4: Documentação**
+  - [ ] Task 17.4.1: Seção no README (raiz ou `web/README.md`) documentando como rodar `web/` junto com o Emulator Suite (2 processos: `firebase emulators:start` na raiz + `npm run dev` em `web/`), incluindo o passo de criar um cliente de teste, promovê-lo a admin via `functions/scripts/setAdminClaim.js` e logar novamente (ou usar `refreshClaims()`) para o claim refletir na UI (critério de aceite: seguindo os passos do zero, um dev cria um cliente, promove a admin via script, loga e acessa `/admin/produtos` com sucesso)
+  - [ ] Task 17.4.2: Documentar no README o passo opcional do Stripe CLI (`stripe listen --forward-to http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/webhooks/stripe`) necessário para o pedido transicionar automaticamente para `confirmado` após o pagamento de teste ser confirmado no front-end — reflete a nuance da Decisão técnica 4 (critério de aceite: comando exato documentado; README esclarece que esse passo é opcional para exercitar RN23 isoladamente, mas necessário para ver RN23+RN12 fechar o ciclo)
+  Dependências: Módulos 13-16 completos (ou ao menos estáveis o suficiente para documentar com precisão).
+
+#### Rastreabilidade RN21-RN27 → Tasks de teste (consolidada, Módulo 17)
+
+| Regra | Tasks de teste que cobrem |
+|---|---|
+| RN21 | 17.2.1 |
+| RN22 | 17.2.3 |
+| RN23 | 17.2.4 |
+| RN24 | 17.2.5 |
+| RN25 | 17.2.6 |
+| RN26 | 17.2.2 |
+| RN27 | 17.3.1 |
+
+---
+
+### Rastreabilidade RN21-RN27 → Tasks (consolidada, todos os módulos da Fase 4)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN21 | Cadastro/login de clientes via Firebase Auth (Auth Emulator) | 13.4.1, 14.1.1, 14.1.2, 14.2.1, 14.2.2, 14.2.3, 17.2.1 |
+| RN22 | Cliente autenticado visualiza o catálogo de produtos | 15.1.1, 15.1.2, 17.2.3 |
+| RN23 | Cliente monta/cria pedido e completa pagamento via Stripe Elements com `paymentClientSecret` | 15.2.1, 15.2.2, 15.2.3, 15.2.4, 15.2.5, 17.2.4, 17.4.2 |
+| RN24 | Cliente vê histórico dos próprios pedidos e cancela pedido `pendente` | 15.3.1, 15.3.2, 15.3.3, 17.2.5 |
+| RN25 | Área exclusiva do Admin: CRUD de Produtos e gestão de Pedidos | 16.1.1, 16.1.2, 16.1.3, 16.2.1, 16.2.2, 16.2.3, 17.2.6 |
+| RN26 | UI de admin escondida para quem não tem o claim; backend é a fonte real de autorização | 13.3.2, 14.3.1, 14.3.2, 16.2.2, 17.2.2 |
+| RN27 | Aplicação nunca se conecta a um projeto Firebase real; sempre aponta para o Emulator Suite local por padrão | 13.4.1, 17.3.1 |
+
+### Fora de escopo desta rodada (delegado diretamente ao devops-tech-writer a partir da spec)
+
+Os Requisitos de DevOps & Doc da Fase 4 (seção 4 da spec): `.env.example` do front-end (config do Firebase Web App em placeholders e `VITE_STRIPE_PUBLISHABLE_KEY` como `pk_test_...` placeholder); CI leve (lint + build + test) para `web/`, mesmo padrão de `ci-services.yml`, sem step de deploy (a aplicação não é publicada nesta fase, uso local/experimentação por decisão explícita do usuário). O conteúdo funcional do README sobre "como rodar `web/` + emulador juntos" (Épico 17.4 acima) já é responsabilidade deste backlog por estar explicitamente dentro do Módulo 17 (seção 3 da spec, atribuído ao arquiteto-tarefas); a criação do arquivo `.env.example` em si e o workflow de CI ficam com o devops-tech-writer, coordenando os nomes exatos de variável definidos nas Decisões técnicas 4 e 6 acima (`VITE_FIREBASE_PROJECT_ID`, `VITE_AUTH_EMULATOR_URL`, `VITE_STRIPE_PUBLISHABLE_KEY`) para não haver divergência entre o que o código lê e o que o `.env.example` documenta.
+
+### Bloqueios (a levar de volta ao agente clarificador)
+
+Nenhum bloqueio de negócio identificado nesta rodada. Uma nuance foi identificada e resolvida como decisão técnica, não como bloqueio: RN23 exige apenas que a aplicação "exercite RN10 de ponta a ponta" (criação da PaymentIntent e confirmação do pagamento via Stripe Elements) — a transição do **status** do pedido para `confirmado` é RN12 (Fase 2), que depende da entrega do webhook, algo que só acontece localmente com o Stripe CLI configurado (`stripe listen`, fora do que a spec da Fase 4 pede explicitamente). Isso não é uma lacuna de regra de negócio: a spec não promete o fechamento desse ciclo automaticamente em ambiente local, e o comportamento (pedido fica `pendente` até ação manual do Admin, RN25, se o Stripe CLI não estiver rodando) é consistente com as regras já existentes — apenas documentado explicitamente (Decisão técnica 4, Task 15.2.5, Task 17.4.2) para não ser confundido com um defeito da implementação.
+
+Demais decisões (estrutura de pastas de `web/src/`, forma de tratamento de erro do cliente HTTP, mecanismo de exposição do claim de admin, integração exata com Stripe Elements, persistência do carrinho) são detalhes técnicos de implementação, delegados pela própria spec ao arquiteto-tarefas, e foram resolvidos e documentados na seção "Decisões técnicas registradas nesta rodada" acima.
