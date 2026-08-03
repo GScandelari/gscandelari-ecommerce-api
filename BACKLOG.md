@@ -174,3 +174,145 @@
 Nenhum. O único bloqueio identificado nesta rodada — restauração de estoque em cancelamento feito por Admin fora do estado `pendente` — foi resolvido pelo clarificador: **RN07a** define que o estoque só é restaurado automaticamente se o pedido estava `pendente` no momento do cancelamento; cancelamento pelo Admin em `confirmado`/`enviado` não restaura estoque (ajuste manual, fora do escopo da Fase 1). As Tasks 2.6.5 e 3.3.4 já refletem essa regra.
 
 Demais decisões (código de status HTTP para acesso negado em `GET /pedidos/:id`, gatilho manual vs. automático de deploy) são detalhes técnicos de implementação já delegados pela própria spec e foram resolvidos dentro das tasks correspondentes.
+
+---
+
+## Backlog: gscandelari-ecommerce-api — Fase 2 (Integração de Pagamento — Stripe)
+
+> Gerado a partir de SPEC.md, seção "Fase 2". Fragmenta os Módulos 5-7 (seção 3 da Fase 2) em épicos e tasks técnicas pequenas, testáveis de forma independente. Nenhuma regra de negócio (RN10-RN15) foi reaberta ou reinterpretada além do necessário para viabilizar a implementação; decisões puramente técnicas (nomes de campos, sequenciamento de chamadas, códigos HTTP de erro de integração) foram tomadas nesta rodada e estão documentadas em cada task. A Fase 1 (Módulos 1-4, 49/49 testes, já em produção) não foi alterada em escopo — apenas estendida onde a Fase 2 exige (modelo `Pedido`, `app.ts`, `pedidosService.ts`).
+
+### Decisões técnicas registradas nesta rodada (não são bloqueios, não requerem o clarificador)
+
+1. **Onde a PaymentIntent entra na transação de criação do pedido:** a chamada ao Stripe é uma chamada de rede externa e **nunca** pode acontecer dentro de `db.runTransaction(...)` (a transação existente em `pedidosService.criarPedido`, que decrementa estoque) porque transações do Firestore podem ser reexecutadas em caso de conflito de concorrência, o que criaria PaymentIntents duplicadas a cada retry. Sequência decidida:
+   1. A transação Firestore **já existente** (Task 2.6.2 da Fase 1) roda **sem alteração de comportamento**, apenas inicializando os novos campos de pagamento como "ainda não processado" (`paymentStatus: 'aguardando_pagamento'`, `paymentIntentId: null`, `paymentClientSecret: null`). O pedido é persistido e o estoque decrementado, exatamente como hoje.
+   2. **Fora** da transação, depois do commit, o serviço chama `stripe.paymentIntents.create(...)` com `amount = Math.round(pedido.total * 100)` (Stripe trabalha em centavos), `currency: 'brl'` e `metadata.pedidoId = pedido.id`.
+   3. Em caso de sucesso, um `update` simples (não-transacional; nada mais escreve nesses dois campos nesse momento) grava `paymentIntentId`/`paymentClientSecret`/`paymentStatus: 'aguardando_pagamento'→` mantém, no documento já existente.
+   4. Em caso de falha do Stripe (rede, chave inválida, etc.), executa-se uma **ação compensatória**: o pedido já criado é cancelado (reaproveitando a mesma lógica de restauração de estoque de RN06/RN07a) e marcado `paymentStatus: 'falhou'`, e a rota responde **502** ao cliente. Decisão: o pedido **não é apagado** (mantém trilha de auditoria, consistente com o fato de que nada no sistema hoje deleta pedidos), fica com `status: 'cancelado'`. Isso evita pedidos "pendentes" órfãos sem PaymentIntent associada.
+2. **Nomes de campo decididos** em `Pedido`: `paymentIntentId: string | null`, `paymentClientSecret: string | null`, `paymentStatus: 'aguardando_pagamento' | 'pago' | 'falhou'`. `paymentStatus` é deliberadamente um campo separado de `status` (que continua sendo a máquina de estados do pedido/RN05) para não sobrecarregar a máquina de estados existente com semântica de pagamento.
+3. **Raw body do webhook:** `app.use(express.json())` está registrado globalmente em `app.ts` antes de qualquer rota. `stripe.webhooks.constructEvent()` exige o corpo **cru** (Buffer), não o objeto já parseado pelo `express.json()`. Decisão: a rota `POST /webhooks/stripe` é registrada com `express.raw({ type: 'application/json' })` **antes** do `app.use(express.json())` global (Express aplica o parser de corpo apenas uma vez por request — a primeira rota/middleware que já tiver lido/consumido o body "vence"). Ver Task 6.1.1 para o detalhe de implementação e teste de regressão garantindo que `/produtos` e `/pedidos` continuam recebendo JSON normalmente.
+4. **Reuso de lógica de domínio pelo webhook, sem checagem de papel:** o webhook não tem `req.user` (rota pública, RN11) — as novas funções de serviço chamadas por ele (`confirmarPagamentoPedido`, `cancelarPedidoPorFalhaPagamento`) não fazem checagem de admin/dono, pois a autorização do webhook é a própria verificação de assinatura Stripe (RN11), não Firebase Auth. Essas funções são internas, não expostas via rota HTTP.
+5. **Eventos de tipo não mapeado** (nem `payment_intent.succeeded` nem `payment_intent.payment_failed`): aceitos com 200 e ignorados (sem efeito de domínio), para não gerar reentrega infinita por parte do Stripe. Registrados em `stripeEvents` por completude.
+
+### Ordem sugerida de execução (visão macro)
+
+1. **Módulo 5 / Épicos 5.1 e 5.2** (cliente Stripe + extensão do modelo) — podem rodar em paralelo entre si; pré-requisito de tudo o resto.
+2. **Módulo 6 / Épico 6.1** (rota pública + raw body) — pode começar em paralelo ao Módulo 5, depende só da infra existente (`app.ts`).
+3. **Módulo 5 / Épico 5.3** (criação da PaymentIntent no fluxo de criação de pedido) — depende de 5.1, 5.2 e do `pedidosService.criarPedido` já existente (Fase 1).
+4. **Módulo 6 / Épicos 6.2 → 6.3 → 6.4** (assinatura → idempotência → processamento dos eventos), nessa ordem interna — 6.4 depende também de 5.2 (campos de pagamento) e reaproveita lógica de cancelamento/estoque da Fase 1.
+5. **Módulo 7** (Testes) — pode ser feito incrementalmente em paralelo a cada épico dos Módulos 5/6 (TDD), mas o fechamento de cobertura e a checagem de regressão (Épico 7.5) só acontecem depois de 5.3 e 6.4 completos.
+
+---
+
+### Módulo 5: Integração Stripe
+
+- **Épico 5.1: Setup do cliente Stripe**
+  - [ ] Task 5.1.1: Adicionar dependência do SDK oficial `stripe` a `functions/package.json` e criar `functions/src/stripeClient.ts` exportando `getStripeClient()` (singleton, mesmo padrão de `firebaseAdmin.ts`), configurado com a chave secreta lida de variável de ambiente/Secret Manager (`STRIPE_SECRET_KEY`) (critério de aceite: `getStripeClient()` retorna uma instância de `Stripe`; chamar a função sem a env var definida lança erro claro e imediato, testável isoladamente)
+  - [ ] Task 5.1.2: Documentar `STRIPE_SECRET_KEY` (valor dummy/placeholder, nunca uma chave real) em `.env.example`, para uso no emulator; nos testes Jest o SDK real nunca é chamado (mockado no Módulo 7) (critério de aceite: `.env.example` lista a variável com comentário explicando que deve ser uma chave `sk_test_...`; app sobe no emulator sem falhar mesmo com valor dummy)
+  - [ ] Task 5.1.3: Adicionar classe `PaymentGatewayError` (HTTP 502) a `errors/index.ts`, integrada ao middleware de erro existente — usada quando o Stripe falha após o pedido já ter sido criado (critério de aceite: lançar `PaymentGatewayError` em qualquer handler retorna 502 com o payload padronizado `{ error: { code, message } }`, mesmo padrão das demais classes de erro)
+  Dependências: nenhuma (Módulo 1 já fornece a estrutura de pastas/erros).
+
+- **Épico 5.2: Modelo de dados — extensão de Pedido**
+  - [ ] Task 5.2.1: Estender `Pedido`/`PedidoInput` (`functions/src/models/pedido.ts`) com `paymentIntentId: string | null`, `paymentClientSecret: string | null`, `paymentStatus: 'aguardando_pagamento' | 'pago' | 'falhou'` — base estrutural de **RN10** (critério de aceite: tipos compilam sem erro; `criarPedido` inicializa os três campos dentro da mesma transação Firestore já existente, antes de qualquer chamada ao Stripe, sem alterar o comportamento de decremento de estoque já testado na Fase 1)
+  Dependências: nenhuma (extensão pura de tipo, pode rodar em paralelo à 5.1).
+
+- **Épico 5.3: Criação da PaymentIntent na criação do pedido — implementa RN10**
+  - [ ] Task 5.3.1: Criar `functions/src/services/stripeService.ts` com `criarPaymentIntent(pedido: Pedido): Promise<{ paymentIntentId: string; clientSecret: string }>`, chamando `stripe.paymentIntents.create({ amount: Math.round(pedido.total * 100), currency: 'brl', metadata: { pedidoId: pedido.id } })` — implementa parte de **RN10** (critério de aceite: função isolada, testável com o cliente Stripe mockado, sem qualquer outra responsabilidade além de traduzir `Pedido` → chamada Stripe)
+  - [ ] Task 5.3.2: Criar a função de compensação `cancelarPedidoPorFalhaCriacaoPagamento(pedidoId)` em `pedidosService.ts`, reaproveitando a mesma rotina `restaurarEstoque` já usada por `cancelarPedidoCliente`/`alterarStatusAdmin`, transicionando o pedido para `status: 'cancelado'` e `paymentStatus: 'falhou'` (critério de aceite: chamada isolada e testável; ao ser executada, o estoque dos itens do pedido é restaurado e o status vira `cancelado`, validável por leitura direta no Firestore Emulator)
+  - [ ] Task 5.3.3: Orquestrar em `pedidosService.ts` um novo `criarPedidoComPagamento(clienteId, itens)` que: (a) chama a transação Firestore já existente (Task 2.6.2, inalterada) para criar o pedido com os campos de pagamento "vazios"; (b) fora da transação, chama `stripeService.criarPaymentIntent`; (c) em sucesso, faz `update` (não-transacional) do pedido com `paymentIntentId`/`paymentClientSecret`; (d) em falha, chama a compensação da Task 5.3.2 e relança como `PaymentGatewayError` — implementa a decisão arquitetural documentada acima, base de **RN10** (critério de aceite: nenhuma chamada de rede ao Stripe ocorre dentro de `db.runTransaction`, verificável por inspeção de código/teste; em caso de falha simulada do Stripe, o pedido termina `cancelado` com estoque restaurado, nunca "pendente" sem PaymentIntent associada)
+  - [ ] Task 5.3.4: Atualizar `POST /pedidos` (`pedidos.routes.ts`) para chamar `criarPedidoComPagamento` em vez de `criarPedido`, incluindo `paymentIntentId` e `paymentClientSecret` no corpo da resposta 201 — implementa **RN10** (critério de aceite: resposta 201 contém `paymentIntentId` e `paymentClientSecret` não nulos em caso de sucesso; em caso de falha do Stripe mockada, resposta é 502 com payload padronizado de erro)
+  Dependências: Épicos 5.1, 5.2; Módulo 2 da Fase 1 (`pedidosService.criarPedido`, inalterado internamente).
+
+#### Rastreabilidade RN10 → Tasks (Módulo 5)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN10 | PaymentIntent criada automaticamente na criação do pedido; `paymentIntentId`/`clientSecret` persistidos e retornados | 5.2.1, 5.3.1, 5.3.2, 5.3.3, 5.3.4 |
+
+---
+
+### Módulo 6: Webhook & idempotência
+
+- **Épico 6.1: Infra de rota pública com raw body**
+  - [ ] Task 6.1.1 **(sinalizada explicitamente — impacto direto do `express.json()` global)**: Reordenar os middlewares em `app.ts` de modo que `POST /webhooks/stripe` seja registrado com `express.raw({ type: 'application/json' })` **antes** de `app.use(express.json())` (o parser de body só pode ser consumido uma vez por request) — pré-requisito estrutural de **RN11** (critério de aceite: teste de integração confirma que `req.body` chega como `Buffer` dentro do handler do webhook; testes de regressão confirmam que `POST /produtos` e `POST /pedidos` continuam recebendo `req.body` como objeto JSON parseado normalmente, sem quebrar nenhum teste da Fase 1)
+  - [ ] Task 6.1.2: Criar `functions/src/routes/webhooks.routes.ts` com `POST /webhooks/stripe`, montado em `app.ts` **sem** o middleware `authenticate` (rota pública, por definição de RN11) — implementa parte estrutural de **RN11** (critério de aceite: rota responde sem exigir header `Authorization`; qualquer outro path sob `/webhooks` segue o 404 padrão do app)
+  Dependências: nenhuma nova; ambas podem começar em paralelo ao Módulo 5, mas 6.1.1 deve ser resolvida antes de qualquer outra task do Módulo 6 (o handler depende do body cru).
+
+- **Épico 6.2: Validação de assinatura e parsing do evento — implementa RN11**
+  - [ ] Task 6.2.1: Documentar `STRIPE_WEBHOOK_SECRET` em `.env.example` e implementar, dentro do handler de `POST /webhooks/stripe`, a chamada `stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], secret)`, capturando exceção de assinatura inválida — implementa **RN11** (critério de aceite: header `stripe-signature` ausente ou assinatura inválida → 400, nenhuma escrita em qualquer coleção do Firestore; assinatura válida → evento Stripe tipado disponível para o restante do handler)
+  Dependências: Épico 6.1.
+
+- **Épico 6.3: Idempotência — implementa RN14**
+  - [ ] Task 6.3.1: Criar `functions/src/repositories/stripeEventsRepository.ts` para a coleção `stripeEvents` (`{ eventId, type, processedAt }`), com `jaProcessado(eventId): Promise<boolean>` e `registrarEventoProcessado(eventId, type): Promise<void>` — implementa **RN14** (critério de aceite: `jaProcessado` retorna `false` para evento novo e `true` após `registrarEventoProcessado` ser chamado para o mesmo `eventId`, validado contra o Firestore Emulator)
+  - [ ] Task 6.3.2: No handler do webhook, checar `jaProcessado(event.id)` logo após a validação de assinatura e antes de qualquer efeito colateral de domínio; se já processado, responder 200 imediatamente sem reprocessar; caso contrário, processar o evento (Épico 6.4) e só então chamar `registrarEventoProcessado` — implementa **RN14** (critério de aceite: reenvio do mesmo `event.id` para `payment_intent.succeeded`/`payment_intent.payment_failed` não dispara segunda transição de status nem segunda restauração de estoque, validado por leitura direta no Firestore)
+  Dependências: Épico 6.2.
+
+- **Épico 6.4: Processamento dos eventos de pagamento — implementa RN12, RN13, RN15**
+  - [ ] Task 6.4.1: Adicionar a `pedidosService.ts` as funções internas `confirmarPagamentoPedido(pedidoId)` e `cancelarPedidoPorFalhaPagamento(pedidoId)`, sem checagem de autorização de cliente/admin (a autorização do chamador é a assinatura Stripe validada em 6.2, não Firebase Auth) — cada função é **idempotente por construção**: se o pedido não existir ou não estiver `pendente`, retorna um resultado "noop" (sem lançar erro, sem alterar o Firestore) — base de **RN12**, **RN13**, **RN15** (critério de aceite: chamar a função para pedido inexistente, ou para pedido já `confirmado`/`cancelado`/`entregue`, resulta em noop identificável pelo chamador, sem exceção e sem escrita no Firestore; chamar para pedido `pendente` produz o efeito esperado — `confirmarPagamentoPedido` transiciona para `confirmado` e seta `paymentStatus: 'pago'`; `cancelarPedidoPorFalhaPagamento` reaproveita `restaurarEstoque`, transiciona para `cancelado` e seta `paymentStatus: 'falhou'`)
+  - [ ] Task 6.4.2: Handler do webhook chama `confirmarPagamentoPedido(event.data.object.metadata.pedidoId)` para o tipo `payment_intent.succeeded` — implementa **RN12** (critério de aceite: pedido `pendente` + evento `succeeded` → status vira `confirmado`; resposta 200)
+  - [ ] Task 6.4.3: Handler do webhook chama `cancelarPedidoPorFalhaPagamento(event.data.object.metadata.pedidoId)` para os tipos `payment_intent.payment_failed` e `payment_intent.canceled` (mapeados como equivalentes de falha/expiração, conforme RN13) — implementa **RN13** (critério de aceite: pedido `pendente` + evento de falha → status vira `cancelado`, estoque restaurado; resposta 200)
+  - [ ] Task 6.4.4: Confirmar (via teste, não via código adicional — o comportamento já vem da Task 6.4.1) que evento com `metadata.pedidoId` inexistente ou pedido já fora de `pendente` responde 200 sem nenhuma escrita em `pedidos`, apenas logging — implementa **RN15** (critério de aceite: os dois cenários — pedido inexistente e pedido não-pendente — cobertos por teste de integração, ambos 200, ambos sem alteração no documento do pedido quando ele existe)
+  - [ ] Task 6.4.5: Tratar tipos de evento fora do mapeamento de RN12/RN13 (ex. `charge.refunded`, `payment_intent.created`) — decisão técnica: aceitar com 200, sem efeito de domínio, registrando em `stripeEvents` (Task 6.3.1) para não reprocessar (critério de aceite: evento de tipo desconhecido retorna 200, nenhuma escrita em `pedidos`, um doc é criado em `stripeEvents`)
+  Dependências: Épicos 6.2, 6.3; Épico 5.2 (campos de pagamento no modelo `Pedido`).
+
+#### Rastreabilidade RN11-RN15 → Tasks (Módulo 6)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN11 | Webhook público, assinatura validada antes de qualquer processamento | 6.1.1, 6.1.2, 6.2.1 |
+| RN12 | `payment_intent.succeeded` em pedido `pendente` → `confirmado` | 6.4.1, 6.4.2 |
+| RN13 | `payment_intent.payment_failed`/equivalente em pedido `pendente` → cancela e restaura estoque | 6.4.1, 6.4.3 |
+| RN14 | Reentrega do mesmo `event.id` é ignorada (idempotência) | 6.3.1, 6.3.2 |
+| RN15 | `pedidoId` inexistente ou pedido não mais `pendente` → 200 sem efeito colateral | 6.4.1, 6.4.4 |
+
+---
+
+### Módulo 7: Testes
+
+- **Épico 7.1: Setup de mocks do Stripe**
+  - [ ] Task 7.1.1: Configurar `jest.mock` sobre `functions/src/stripeClient.ts` com uma factory reutilizável (`test/helpers/mockStripe.ts`) capaz de simular `paymentIntents.create` e `webhooks.constructEvent` (sucesso e erro configuráveis por teste), sem nenhuma chamada de rede real e sem dependência de internet no CI (critério de aceite: helper permite configurar retorno/erro por teste; suíte roda offline)
+  Dependências: Módulo 5 (Épico 5.1), Módulo 3 da Fase 1 (infraestrutura Jest já existente).
+
+- **Épico 7.2: Testes de criação de pedido com pagamento — cobre RN10**
+  - [ ] Task 7.2.1: Teste `POST /pedidos` com sucesso: `paymentIntents.create` mockada retorna id + client secret → resposta 201 inclui `paymentIntentId`/`paymentClientSecret`; Firestore reflete os campos persistidos (critério de aceite: assert direto no Firestore Emulator e no corpo da resposta)
+  - [ ] Task 7.2.2: Teste `POST /pedidos` com `paymentIntents.create` mockada rejeitando: resposta 502; pedido no Firestore fica `cancelado`/`paymentStatus: 'falhou'`, estoque restaurado ao valor original (critério de aceite: leitura direta no Firestore confirma estoque igual ao valor anterior à tentativa de criação, e nenhuma PaymentIntent "fantasma" é referenciada no documento)
+  Dependências: Épico 7.1, Módulo 5 (Épico 5.3).
+
+- **Épico 7.3: Testes do webhook — cobre RN11, RN12, RN13, RN15**
+  - [ ] Task 7.3.1: Teste de assinatura inválida (`webhooks.constructEvent` mockada lançando erro) → 400, nenhuma escrita em `pedidos` nem `stripeEvents` — cobre **RN11**
+  - [ ] Task 7.3.2: Teste `payment_intent.succeeded` para pedido `pendente` existente → pedido vira `confirmado`, `paymentStatus: 'pago'`, resposta 200 — cobre **RN12**
+  - [ ] Task 7.3.3: Teste `payment_intent.payment_failed` para pedido `pendente` existente → pedido vira `cancelado`, estoque restaurado, resposta 200 — cobre **RN13**
+  - [ ] Task 7.3.4: Teste de evento com `metadata.pedidoId` inexistente → 200, nenhuma escrita em `pedidos` — cobre **RN15**
+  - [ ] Task 7.3.5: Teste de evento `payment_intent.succeeded` para pedido já em `confirmado` (fora de `pendente`) → 200, nenhuma alteração adicional — cobre **RN15**
+  Dependências: Épico 7.1, Módulo 6 completo (Épicos 6.1-6.4).
+
+- **Épico 7.4: Testes de idempotência — cobre RN14**
+  - [ ] Task 7.4.1: Teste de reenvio do mesmo `event.id` (`payment_intent.succeeded` duplicado) → segunda entrega não altera novamente o status, retorna 200 — cobre **RN14**
+  - [ ] Task 7.4.2: Teste de reenvio do mesmo `event.id` (`payment_intent.payment_failed` duplicado) → estoque não é restaurado duas vezes, retorna 200 — cobre **RN14**
+  Dependências: Épico 7.1, Módulo 6 (Épico 6.3).
+
+- **Épico 7.5: Regressão e cobertura final**
+  - [ ] Task 7.5.1: Rodar a suíte completa (Fase 1 + Fase 2) contra o Emulator Suite e confirmar zero regressões nos 49 testes já existentes da Fase 1, além dos novos testes verdes (critério de aceite: `npm run test:emulator` verde, nenhum teste pré-existente quebrado)
+  - [ ] Task 7.5.2: Confirmar que a cobertura ≥70% (threshold já configurado na Task 3.5.1 da Fase 1) se mantém com o novo código do Módulo 5/6 incluído (critério de aceite: `npm run test:coverage` reporta ≥70% em todas as métricas e não falha o threshold configurado)
+  - [ ] Task 7.5.3: Produzir, em conjunto com o agente qa-negocio, a tabela final de rastreabilidade RN10-RN15 → testes automatizados (critério de aceite: tabela produzida sem nenhuma RN10-RN15 órfã de teste, consolidando as tabelas por módulo acima)
+  Dependências: Épicos 7.2, 7.3, 7.4 completos.
+
+#### Rastreabilidade RN10-RN15 → Tasks (consolidada, Módulo 7)
+
+| Regra | Tasks de teste que cobrem |
+|---|---|
+| RN10 | 7.2.1, 7.2.2 |
+| RN11 | 7.3.1 |
+| RN12 | 7.3.2 |
+| RN13 | 7.3.3 |
+| RN14 | 7.4.1, 7.4.2 |
+| RN15 | 7.3.4, 7.3.5 |
+
+---
+
+### Fora de escopo desta rodada (delegado diretamente ao devops-tech-writer a partir da spec)
+
+Os Requisitos de DevOps & Doc da Fase 2 (seção 4 da spec: novos segredos `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` via Secret Manager, documentação de cartões de teste do Stripe no README, passo manual de configurar a URL do webhook no Dashboard do Stripe) não foram decompostos em épicos/tasks nesta rodada, por não fazerem parte dos Módulos 5-7 solicitados. Ficam sinalizados aqui para o agente devops-tech-writer consumir diretamente da spec, no mesmo padrão do Módulo 4 já usado na Fase 1.
+
+### Bloqueios (a levar de volta ao agente clarificador)
+
+Nenhum bloqueio de negócio identificado nesta rodada. Todas as lacunas encontradas durante o planejamento eram de natureza técnica (sequenciamento da chamada Stripe em relação à transação Firestore; formato do corpo cru no Express; nomes de campos no modelo `Pedido`; código HTTP de erro de gateway de pagamento) e foram resolvidas e documentadas na seção "Decisões técnicas registradas nesta rodada" acima, sem necessidade de reabrir RN10-RN15.
