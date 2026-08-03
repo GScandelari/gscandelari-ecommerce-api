@@ -2,10 +2,11 @@
 
 Portfólio de demonstração de "Desenvolvimento de APIs REST robustas, integrações e microsserviços com Node.js e Express", construído em Firebase (Cloud Functions 2ª geração + Express + Firestore, plano Blaze).
 
-O domínio é um **Sistema de Pedidos & Pagamentos (E-commerce Core)**, único, que evolui em 3 fases dentro de um **monorepo** chamado `gscandelari-ecommerce-api`:
+O domínio é um **Sistema de Pedidos & Pagamentos (E-commerce Core)**, único, que evolui em fases dentro de um **monorepo** chamado `gscandelari-ecommerce-api`:
 - **Fase 1 (concluída, deployada):** API core — Produtos, Pedidos, Clientes, sem gateway de pagamento real.
 - **Fase 2 (concluída, deployada):** integração de pagamento real (Stripe, sempre em modo sandbox/teste) via PaymentIntent + webhook.
-- **Fase 3 (esta spec):** quebra em microsserviços (Orders, Payments, Notifications), cada um um codebase de Cloud Functions deployável independentemente, com API Gateway via Firebase Hosting rewrites.
+- **Fase 3 (concluída, código em `main`, deploy real ainda não executado):** quebra em microsserviços (Orders, Payments, Notifications), cada um um codebase de Cloud Functions deployável independentemente, com API Gateway via Firebase Hosting rewrites.
+- **Fase 4 (esta spec):** front-end de testes (React + Vite) para clientes e administradores, rodando contra o Emulator Suite (monólito da Fase 1+2).
 
 ---
 
@@ -110,3 +111,35 @@ Decisões técnicas (não são regras de negócio, não precisaram de aprovaçã
 - CI/CD: workflows precisam lidar com múltiplos codebases (lint/build/test por serviço; deploy por codebase, ex. `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`).
 - README deve documentar a nova arquitetura (diagrama textual dos 3 serviços + gateway), como rodar todos os serviços localmente no Emulator Suite, e como testar o fluxo de notificação por e-mail manualmente.
 - Mesma estratégia de deploy manual (`workflow_dispatch`) já usada nas Fases 1/2 — sem mudança.
+
+---
+
+## Fase 4 (Front-end de testes)
+
+### 1. Visão Geral & Escopo
+Uma SPA em **React + Vite (TypeScript)**, em `web/` na raiz do monorepo, para exercitar visualmente a API já construída (Fases 1-2) — não é o produto final do portfólio (esse é a API), é uma **ferramenta de teste/demonstração**. Roda **exclusivamente contra o Firebase Emulator Suite local**, apontando para o monólito da Fase 1+2 (`functions/`, codebase `default`) — nunca contra o projeto Firebase real. Dois perfis de uso: **Cliente** (comprador) e **Administrador** (custom claim `admin: true`), na mesma aplicação, com rotas de admin condicionadas ao claim.
+
+Decisão técnica (não é regra de negócio): o front-end **não acessa Firestore diretamente** — usa Firebase Auth (client SDK, contra o Auth Emulator) só para login/cadastro e obter o ID token, e todas as operações de dados passam pela API REST já existente (`fetch` com `Authorization: Bearer <idToken>`), reaproveitando toda a validação/regra de negócio já implementada no backend.
+
+### 2. Regras de Negócio & Casos de Teste (para o agente qa-negocio)
+- **RN21**: A aplicação permite cadastro e login de clientes via Firebase Auth (email/senha), contra o Auth Emulator.
+- **RN22**: Cliente autenticado visualiza o catálogo de produtos disponíveis (`GET /produtos`).
+- **RN23**: Cliente autenticado monta um pedido (1+ itens) e o cria (`POST /pedidos`); a aplicação usa o `paymentClientSecret` retornado para completar o pagamento via Stripe Elements (cartão de teste), exercitando RN10 de ponta a ponta.
+- **RN24**: Cliente autenticado visualiza a lista dos próprios pedidos com status atual (`GET /pedidos`) e pode cancelar um pedido próprio enquanto `pendente` (`PATCH /pedidos/:id/cancelar`, RN06).
+- **RN25**: Administrador (claim `admin`) tem acesso a uma área exclusiva com: CRUD completo de Produtos (RN01/RN07) e gestão de Pedidos — listar todos, ver detalhe, alterar status manualmente entre as transições válidas (RN05/RN07/RN07a).
+- **RN26**: Rotas/UI de admin são escondidas no front-end para quem não tem o claim, mas isso é só UX — a autorização real continua sendo enforced pelo backend (`requireAdmin`); o front-end nunca é a fonte de verdade de autorização.
+- **RN27**: A aplicação nunca se conecta a um projeto Firebase real — toda configuração (Auth, chamadas à API) aponta para o Emulator Suite local por padrão.
+
+**Casos de teste locais requeridos:** Vitest + React Testing Library (componentes/fluxos principais, com `fetch`/Firebase Auth mockados), sem depender de emulador rodando nos testes automatizados.
+
+### 3. Decomposição de Tarefas (para o agente arquiteto-tarefas)
+- **Módulo 13: Setup do projeto** — Vite + React + TypeScript em `web/`, Tailwind CSS, roteamento (React Router), cliente Firebase Auth configurado para o Emulator, cliente HTTP fino para a API.
+- **Módulo 14: Autenticação** — telas de login/cadastro, contexto de auth (usuário atual + claims), rotas protegidas (cliente autenticado / admin).
+- **Módulo 15: Área do Cliente** — catálogo de produtos, montagem e criação de pedido, integração Stripe Elements para completar pagamento, histórico de pedidos com cancelamento (RN21-RN24).
+- **Módulo 16: Área do Admin** — CRUD de Produtos, listagem/detalhe/alteração de status de Pedidos (RN25).
+- **Módulo 17: Testes e documentação** — Vitest + RTL para os fluxos principais, README de como rodar (emulador + front-end juntos).
+
+### 4. Requisitos de DevOps & Doc (para o agente devops-tech-writer)
+- `.env.example` do front-end: config do Firebase Web App (placeholders, funcionam com o Emulator sem valores reais) e chave publicável do Stripe (`pk_test_...`, não é segredo, mas fica como placeholder mesmo assim).
+- README deve documentar como rodar o front-end junto com o Emulator Suite (dois processos: `firebase emulators:start` + `npm run dev` em `web/`), incluindo criar um usuário admin de teste via `functions/scripts/setAdminClaim.js`.
+- CI leve (lint + build + test) para `web/`, mesmo padrão de `ci-services.yml`. Sem deploy — a aplicação não é publicada nesta fase (uso local/experimentação, conforme decisão do usuário).
