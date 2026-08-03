@@ -1,0 +1,346 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "gscandelari-ecommerce-api",
+    "version": "1.0.0",
+    "description": "API REST de e-commerce (Produtos, Pedidos) - Fase 1 (Core API). Ver SPEC.md e BACKLOG.md no repositorio para o detalhamento completo das regras de negocio (RN01-RN09, RN07a).",
+    "license": { "name": "UNLICENSED" }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Relativo ao host onde a Cloud Function 'api' esta publicada (emulator ou producao)."
+    }
+  ],
+  "tags": [
+    { "name": "Produtos", "description": "Catalogo de produtos (RN01, RN07)" },
+    { "name": "Pedidos", "description": "Pedidos de clientes (RN02-RN09, RN07a)" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Firebase ID Token",
+        "description": "Token obtido via Firebase Auth. Rotas admin-only exigem a custom claim admin:true."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "example": "VALIDATION_ERROR" },
+              "message": { "type": "string" },
+              "details": {}
+            },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["error"]
+      },
+      "ProdutoInput": {
+        "type": "object",
+        "properties": {
+          "nome": { "type": "string", "minLength": 1, "example": "Camiseta" },
+          "preco": { "type": "number", "minimum": 0, "exclusiveMinimum": true, "example": 49.9 },
+          "estoque": { "type": "integer", "minimum": 0, "example": 10 }
+        },
+        "required": ["nome", "preco", "estoque"]
+      },
+      "Produto": {
+        "allOf": [
+          { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
+          { "$ref": "#/components/schemas/ProdutoInput" }
+        ]
+      },
+      "ItemPedidoInput": {
+        "type": "object",
+        "properties": {
+          "produtoId": { "type": "string" },
+          "quantidade": { "type": "integer", "minimum": 0, "exclusiveMinimum": true, "example": 2 }
+        },
+        "required": ["produtoId", "quantidade"]
+      },
+      "CriarPedidoInput": {
+        "type": "object",
+        "properties": {
+          "itens": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/ItemPedidoInput" }
+          }
+        },
+        "required": ["itens"]
+      },
+      "ItemPedido": {
+        "type": "object",
+        "properties": {
+          "produtoId": { "type": "string" },
+          "quantidade": { "type": "integer" },
+          "precoUnitario": { "type": "number" }
+        },
+        "required": ["produtoId", "quantidade", "precoUnitario"]
+      },
+      "PedidoStatus": {
+        "type": "string",
+        "enum": ["pendente", "confirmado", "enviado", "entregue", "cancelado"]
+      },
+      "Pedido": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "clienteId": { "type": "string" },
+          "itens": { "type": "array", "items": { "$ref": "#/components/schemas/ItemPedido" } },
+          "total": { "type": "number" },
+          "status": { "$ref": "#/components/schemas/PedidoStatus" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "clienteId", "itens", "total", "status", "createdAt", "updatedAt"]
+      },
+      "AlterarStatusInput": {
+        "type": "object",
+        "properties": { "status": { "$ref": "#/components/schemas/PedidoStatus" } },
+        "required": ["status"]
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Token de autenticacao ausente, invalido ou expirado (RN09).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Forbidden": {
+        "description": "Usuario autenticado mas sem permissao para a acao (RN06/RN07/RN08).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "Recurso nao encontrado.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ValidationError": {
+        "description": "Payload invalido ou regra de negocio violada (ex.: RN03 - estoque insuficiente).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/produtos": {
+      "get": {
+        "tags": ["Produtos"],
+        "operationId": "listarProdutos",
+        "summary": "Lista todos os produtos (RN09)",
+        "responses": {
+          "200": {
+            "description": "Lista de produtos.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Produto" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Produtos"],
+        "operationId": "criarProduto",
+        "summary": "Cria um produto - somente admin (RN01, RN07)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ProdutoInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Produto criado.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/produtos/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["Produtos"],
+        "operationId": "obterProduto",
+        "summary": "Detalha um produto (RN09)",
+        "responses": {
+          "200": {
+            "description": "Produto encontrado.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Produtos"],
+        "operationId": "atualizarProduto",
+        "summary": "Atualiza um produto - somente admin (RN01, RN07)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ProdutoInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Produto atualizado.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Produtos"],
+        "operationId": "removerProduto",
+        "summary": "Remove um produto - somente admin (RN07)",
+        "responses": {
+          "204": { "description": "Produto removido." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos": {
+      "get": {
+        "tags": ["Pedidos"],
+        "operationId": "listarPedidos",
+        "summary": "Lista pedidos - cliente ve so os proprios, admin ve todos (RN08)",
+        "responses": {
+          "200": {
+            "description": "Lista de pedidos.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Pedido" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Pedidos"],
+        "operationId": "criarPedido",
+        "summary": "Cria um pedido (RN02, RN03, RN04)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CriarPedidoInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pedido criado; estoque dos itens ja decrementado.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/pedidos/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["Pedidos"],
+        "operationId": "obterPedido",
+        "summary": "Detalha um pedido - dono ou admin (RN08)",
+        "responses": {
+          "200": {
+            "description": "Pedido encontrado.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos/{id}/status": {
+      "patch": {
+        "tags": ["Pedidos"],
+        "operationId": "alterarStatusPedido",
+        "summary": "Altera o status do pedido - somente admin (RN05, RN07, RN07a)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AlterarStatusInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status atualizado. Se a transicao for para 'cancelado' e o status anterior era 'pendente', o estoque dos itens e restaurado (RN07a).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": {
+            "description": "Transicao de status invalida (RN05).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos/{id}/cancelar": {
+      "patch": {
+        "tags": ["Pedidos"],
+        "operationId": "cancelarPedido",
+        "summary": "Cliente dono cancela o proprio pedido (RN06)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pedido cancelado; estoque dos itens restaurado.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": {
+            "description": "Pedido nao esta mais em 'pendente' (RN06).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  }
+}
