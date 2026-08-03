@@ -139,15 +139,15 @@
 ### Módulo 4 (paralelo, devops-tech-writer): Infra de entrega
 
 - **Épico 4.1: Git & convenções**
-  - [ ] Task 4.1.1: Criar repositório remoto no GitHub `gscandelari-ecommerce-api`, branch `main` protegida (critério de aceite: repo criado, `main` é branch default e protegida exigindo PR) — repo criado e público (https://github.com/GScandelari/gscandelari-ecommerce-api); **branch protection ainda não configurada** (passo manual no GitHub Settings > Branches, fora do escopo de arquivos versionados).
+  - [x] Task 4.1.1: Criar repositório remoto no GitHub `gscandelari-ecommerce-api`, branch `main` protegida (critério de aceite: repo criado, `main` é branch default e protegida exigindo PR) — repo criado e público (https://github.com/GScandelari/gscandelari-ecommerce-api); branch protection configurada via API (PR obrigatório, check de CI obrigatório, sem force-push/deleção).
   - [x] Task 4.1.2: Documentar convenção Conventional Commits (`feat:`, `fix:`, `chore:`, `test:`, `docs:`...) (critério de aceite: `CONTRIBUTING.md` ou seção no README descreve a convenção; opcionalmente `commitlint` configurado)
-  - [ ] Task 4.1.3: Documentar e configurar fluxo GitHub Flow (feature branches curtas, PR obrigatório para `main`) (critério de aceite: documento descreve o fluxo; branch protection exige PR + checks antes de merge) — fluxo documentado em `CONTRIBUTING.md`; branch protection pendente (mesma pendência da Task 4.1.1).
+  - [x] Task 4.1.3: Documentar e configurar fluxo GitHub Flow (feature branches curtas, PR obrigatório para `main`) (critério de aceite: documento descreve o fluxo; branch protection exige PR + checks antes de merge)
   Dependências: nenhuma — pode iniciar em paralelo ao Módulo 1.
 
 - **Épico 4.2: CI/CD (GitHub Actions)**
   - [x] Task 4.2.1: Workflow de CI — instalar dependências e rodar lint em cada PR (critério de aceite: PR com erro de lint falha o check; PR limpo passa)
   - [x] Task 4.2.2: Workflow de CI — rodar testes (Jest+Supertest) contra o Firebase Emulator Suite dentro do runner (critério de aceite: workflow sobe/usa `firebase emulators:exec`, roda a suíte completa, falha o PR se algum teste falhar)
-  - [ ] Task 4.2.3: Workflow de CD — deploy para Firebase Functions a partir de `main` (critério de aceite: `firebase deploy --only functions` executa usando credenciais via GitHub Secret, disparado apenas quando branch = `main`, conforme estratégia definida na Task 4.5.1) — workflow `deploy.yml` existe e está correto, mas depende da Task 4.4.3 (secret ainda não configurado); primeiro deploy real foi feito via CLI local, não via este workflow.
+  - [ ] Task 4.2.3: Workflow de CD — deploy para Firebase Functions a partir de `main` (critério de aceite: `firebase deploy --only functions` executa usando credenciais via GitHub Secret, disparado apenas quando branch = `main`, conforme estratégia definida na Task 4.5.1) — workflow `deploy.yml` existe e o secret (Task 4.4.3) já está configurado; **ainda não foi disparado/validado de ponta a ponta** (o primeiro deploy real foi feito via CLI local, não via este workflow).
   Dependências: 4.2.1/4.2.2 requerem scripts de lint/test do Módulo 1/3 existentes; 4.2.3 depende de 4.2.1, 4.2.2 verdes e da Task 4.4.3.
 
 - **Épico 4.3: Documentação (README)**
@@ -160,7 +160,7 @@
 - **Épico 4.4: Gestão de segredos**
   - [x] Task 4.4.1: Levantar lista de segredos necessários da aplicação na Fase 1 (critério de aceite: lista documentada; como a Fase 1 não integra gateway de pagamento real, documentar explicitamente quais segredos de app existem ou registrar "N/A nesta fase" além das credenciais de deploy) — N/A nesta fase (nenhum segredo de aplicação); único segredo é o de deploy (`FIREBASE_SERVICE_ACCOUNT_KEY`), documentado no README.
   - [x] Task 4.4.2: Configurar Firebase Secret Manager para os segredos de aplicação identificados, via `firebase functions:secrets:set` (critério de aceite: segredo(s) configurado(s) e referenciado(s) no código, nenhum valor commitado no repositório) — condicional ao resultado da Task 4.4.1 — N/A (nenhum segredo de aplicação na Fase 1, ver 4.4.1).
-  - [ ] Task 4.4.3: Configurar credenciais de deploy (service account) como GitHub Secret para uso no workflow de CD (critério de aceite: GitHub Actions autentica no Firebase via secret configurado, sem expor credenciais em log) — **pendente**: requer gerar uma Service Account key no Console do Firebase/Google Cloud (`gcloud` não está disponível neste ambiente para automatizar) e configurar como secret `FIREBASE_SERVICE_ACCOUNT_KEY` no GitHub. Enquanto isso, deploy é feito manualmente via CLI local (ver README > Deploy).
+  - [x] Task 4.4.3: Configurar credenciais de deploy (service account) como GitHub Secret para uso no workflow de CD (critério de aceite: GitHub Actions autentica no Firebase via secret configurado, sem expor credenciais em log) — Service Account `github-actions-deploy@gscandelari-ecommerce-api.iam.gserviceaccount.com` criada (papéis: Cloud Functions Admin, Cloud Run Admin, Artifact Registry Administrator, Cloud Build Editor, Service Account User, Firebase Admin), chave configurada como secret `FIREBASE_SERVICE_ACCOUNT_KEY` via `gh secret set` (conteúdo nunca exibido).
   Dependências: Task 4.4.1 primeiro; 4.4.3 é pré-requisito da Task 4.2.3.
 
 - **Épico 4.5: Estratégia de deploy**
