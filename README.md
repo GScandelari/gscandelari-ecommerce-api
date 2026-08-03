@@ -4,7 +4,7 @@ API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, 
 
 Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
-> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está especificada em `SPEC.md` e em desenvolvimento. Fase 3 (quebra em microsserviços) ainda não faz parte deste repositório/spec.
+> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) ainda não faz parte deste repositório/spec.
 
 ## Estado atual do projeto
 
@@ -13,7 +13,7 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 - **Módulo 3 (Testes)**: concluído. `functions/test/` cobre RN01-RN09/RN07a via Jest + Supertest contra o Firebase Emulator Suite — **49/49 testes passando**, cobertura 96%+ (acima da meta de 70% do `SPEC.md`).
 - **Módulo 4 (este documento + CI/CD)**: concluído. Git, CI/CD, README e estratégia de deploy documentados.
 
-**Fase 2 (integração de pagamento via Stripe): EM DESENVOLVIMENTO, não concluída.** O backlog dos Módulos 5-7 (`BACKLOG.md`) já foi gerado e o agente qa-negocio já escreveu os testes que cobrem RN10-RN15 (`functions/test/integration/pedidosPagamento.test.ts`, `functions/test/integration/webhooksStripe.test.ts`, com o SDK do Stripe mockado via `functions/test/helpers/mockStripe.ts`) — esses testes estão **vermelhos por design** (TDD): eles importam `functions/src/stripeClient.ts`, `functions/src/services/stripeService.ts` e `functions/src/routes/webhooks.routes.ts`, que **ainda não existem**. A implementação de produção (Módulos 5 e 6 — cliente Stripe, `stripeService`, rota de webhook, extensão do modelo `Pedido` com `paymentIntentId`/`paymentClientSecret`/`paymentStatus`) está **pendente**. Nenhum endpoint de pagamento está deployado em produção hoje. As seções abaixo marcadas "Fase 2" documentam como configurar os segredos e testar o fluxo **quando a implementação existir** — não descrevem uma funcionalidade já disponível.
+**Fase 2 (integração de pagamento via Stripe): concluída e deployada em produção.** `POST /pedidos` cria automaticamente uma PaymentIntent no Stripe (modo teste); `POST /webhooks/stripe` confirma ou cancela pedidos automaticamente via evento assinado (RN10-RN15), com idempotência. 63/63 testes passando (49 Fase 1 + 14 Fase 2, zero regressão), CI verde no GitHub Actions. Os segredos `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` já estão configurados no Firebase Secret Manager do projeto real e o deploy foi validado de ponta a ponta via `workflow_dispatch`.
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -27,7 +27,7 @@ Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [CI/CD](#cicd)
 - [Deploy](#deploy)
-- [Integração de pagamento (Stripe) — Fase 2, em desenvolvimento](#integração-de-pagamento-stripe--fase-2-em-desenvolvimento)
+- [Integração de pagamento (Stripe) — Fase 2](#integração-de-pagamento-stripe--fase-2)
 - [Contribuindo](#contribuindo)
 
 ## Pré-requisitos
@@ -81,9 +81,9 @@ Ao rodar via `emulators:start` ou `emulators:exec`, o Firebase CLI injeta automa
 
 ### Segredos de aplicação (runtime, projeto real)
 
-Levantamento (Task 4.4.1 do `BACKLOG.md`): a Fase 1 **não integra nenhum gateway de pagamento real** nem serviço externo que exija chave de API (ver `SPEC.md` seção 1). A Fase 2 (em desenvolvimento — ver "Estado atual do projeto" acima) introduz os dois primeiros segredos de aplicação do projeto, ambos do Stripe **em modo teste/sandbox** (nunca chaves de modo live/produção — este projeto de portfólio nunca processa dinheiro real):
+Levantamento (Task 4.4.1 do `BACKLOG.md`): a Fase 1 **não integra nenhum gateway de pagamento real** nem serviço externo que exija chave de API (ver `SPEC.md` seção 1). A Fase 2 (ver "Estado atual do projeto" acima) introduz os dois primeiros segredos de aplicação do projeto, ambos do Stripe **em modo teste/sandbox** (nunca chaves de modo live/produção — este projeto de portfólio nunca processa dinheiro real):
 
-| Variável | Descrição | Onde é usada (quando o Módulo 5/6 existir) |
+| Variável | Descrição | Onde é usada |
 |---|---|---|
 | `STRIPE_SECRET_KEY` | Chave secreta de **teste** do Stripe (sempre no formato `sk_test_...`, nunca `sk_live_...`) | `functions/src/stripeClient.ts` (`getStripeClient()`) |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret do endpoint de webhook (`whsec_...`), usado para validar a assinatura `stripe-signature` de cada evento recebido | `functions/src/routes/webhooks.routes.ts` |
@@ -95,15 +95,15 @@ firebase functions:secrets:set NOME_DO_SEGREDO
 # valor é digitado interativamente, nunca fica em texto no shell/histórico
 ```
 
-e referenciado no código via a opção `secrets` do `onRequest`/`onCall` (2ª geração), conforme a [documentação oficial do Firebase](https://firebase.google.com/docs/functions/config-env?gen=2#secret-manager). Ver a seção ["Integração de pagamento (Stripe) — Fase 2, em desenvolvimento"](#integração-de-pagamento-stripe--fase-2-em-desenvolvimento) abaixo para o passo a passo completo de como obter as chaves de teste e configurá-las localmente e em produção.
+e referenciado no código via a opção `secrets` do `onRequest`/`onCall` (2ª geração), conforme a [documentação oficial do Firebase](https://firebase.google.com/docs/functions/config-env?gen=2#secret-manager). Ver a seção ["Integração de pagamento (Stripe) — Fase 2"](#integração-de-pagamento-stripe--fase-2) abaixo para o passo a passo completo de como obter as chaves de teste e configurá-las localmente e em produção.
 
 ### Credenciais de deploy (CI/CD)
 
-Para o workflow de deploy (`.github/workflows/deploy.yml`) autenticar no Firebase, é necessário configurar o GitHub Actions Secret:
+Para o workflow de deploy (`.github/workflows/deploy.yml`) autenticar no Firebase, é necessário o GitHub Actions Secret abaixo — **já configurado** neste repositório:
 
 | Secret | Descrição |
 |---|---|
-| `FIREBASE_SERVICE_ACCOUNT_KEY` | JSON de uma Service Account do projeto Firebase real, com permissão de deploy de Cloud Functions (papel `Firebase Admin` ou equivalente mínimo). Gerado em Console do Google Cloud > IAM & Admin > Service Accounts > Keys. Configurado em GitHub > Settings > Secrets and variables > Actions. |
+| `FIREBASE_SERVICE_ACCOUNT_KEY` | JSON da Service Account `github-actions-deploy@gscandelari-ecommerce-api.iam.gserviceaccount.com`, com os papéis listados na seção "Deploy" > "Estado atual" abaixo. Gerado em Console do Google Cloud > IAM & Admin > Service Accounts > Keys. Configurado em GitHub > Settings > Secrets and variables > Actions. |
 
 Esse secret **nunca** é impresso em log (o GitHub Actions mascara automaticamente valores de secret) e é escrito num arquivo temporário do runner, removido ao final do job de deploy — ver `.github/workflows/deploy.yml`.
 
@@ -184,20 +184,22 @@ Workflows em `.github/workflows/`:
 
 ## Deploy
 
-### Estado atual: projeto real provisionado e com deploy ativo
+### Estado atual: projeto real provisionado, CD automatizado validado, Fase 1 + Fase 2 no ar
 
 - **Projeto Firebase (Blaze):** `gscandelari-ecommerce-api` ([console](https://console.firebase.google.com/project/gscandelari-ecommerce-api/overview)), alias `production` em `.firebaserc`.
-- **Function URL:** `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api` (`/health`, `/docs`, `/produtos`, `/pedidos`).
+- **Function URL:** `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api` (`/health`, `/docs`, `/produtos`, `/pedidos`, `/webhooks/stripe`).
 - **Política de limpeza do Artifact Registry** configurada (`firebase functions:artifacts:setpolicy`, imagens de container antigas removidas após 1 dia) — evita custo de armazenamento acumulado.
-- O primeiro deploy foi feito manualmente via Firebase CLI local (ver abaixo). O secret `FIREBASE_SERVICE_ACCOUNT_KEY` para o workflow `deploy.yml` (GitHub Actions) **ainda não foi configurado** — até lá, o deploy continua sendo feito localmente.
+- **Deploy via GitHub Actions validado de ponta a ponta** (`workflow_dispatch`, secret `FIREBASE_SERVICE_ACCOUNT_KEY` configurado): lint, build, testes contra o Emulator Suite e `firebase deploy --only functions` reais, do runner do GitHub até o projeto Firebase real.
+- **Branch protection** ativa em `main` (PR obrigatório + check de CI obrigatório).
+- Segredos do Stripe (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, modo teste) configurados no Firebase Secret Manager — Fase 2 deployada e validada (webhook responde 400 sem assinatura, conforme esperado).
+
+**Papéis da Service Account de deploy** (`github-actions-deploy@gscandelari-ecommerce-api.iam.gserviceaccount.com`), descobertos por tentativa/erro real contra o deploy (a lista abaixo é o mínimo que efetivamente funcionou, não uma lista teórica): Cloud Functions Admin, Cloud Run Admin, Artifact Registry Administrator, Cloud Build Editor, Service Account User, Firebase Admin, Service Usage Admin (necessário para o deploy habilitar `cloudbilling.googleapis.com` sozinho), Secret Manager Secret Accessor e Secret Manager Admin (necessário para o deploy conceder acesso ao secret para a service account de runtime das Functions).
 
 ### Decisão registrada (Task 4.5.1 do `BACKLOG.md`): deploy MANUAL
 
 O deploy a partir de `main` é **manual**, disparado via `workflow_dispatch` (botão "Run workflow" no GitHub Actions, com um campo de confirmação obrigatório) ou via CLI local, e **não** automático a cada merge em `main`. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo ainda assim `main` sempre *deployável* (princípio central do GitHub Flow). Essa decisão pode ser revisitada (trocando o gatilho para `push` em `main`) quando o time preferir deploy contínuo.
 
 ### Deploy manual via GitHub Actions
-
-Pré-requisito pendente: configurar o secret `FIREBASE_SERVICE_ACCOUNT_KEY` no GitHub (Settings > Secrets and variables > Actions), com uma Service Account JSON com permissão de deploy de Functions (gerada no Console do Firebase/Google Cloud — Project Settings > Service Accounts). Depois disso:
 
 1. Garanta que `main` está com o CI verde (badge/check do workflow `ci.yml`).
 2. Vá em GitHub > Actions > workflow **"Deploy Firebase Functions"** > "Run workflow", selecione a branch `main`, digite `deploy` no campo de confirmação e execute.
@@ -215,9 +217,9 @@ npx firebase-tools deploy --only functions --project production
 
 Nunca rode `firebase deploy` apontando para o alias `default`/demo — ele existe apenas para os emuladores.
 
-## Integração de pagamento (Stripe) — Fase 2, em desenvolvimento
+## Integração de pagamento (Stripe) — Fase 2
 
-> **Status: implementação pendente.** Esta seção documenta como a integração com o Stripe **deverá** ser configurada e testada assim que os Módulos 5 e 6 do `BACKLOG.md` forem implementados (`functions/src/stripeClient.ts`, `stripeService.ts`, `webhooks.routes.ts`, extensão do modelo `Pedido`). Hoje, nenhuma rota de pagamento existe no app Express nem está deployada em produção — os testes que cobrem RN10-RN15 já existem (`functions/test/integration/pedidosPagamento.test.ts`, `webhooksStripe.test.ts`) e estão vermelhos por design (TDD), aguardando a implementação. Este projeto **nunca processa dinheiro real**: todas as chaves e o Dashboard usados são sempre em **modo teste/sandbox** do Stripe.
+> **Status: implementado e deployado em produção.** `functions/src/stripeClient.ts`, `stripeService.ts`, `webhooks.routes.ts` e a extensão do modelo `Pedido` existem e estão no ar; os testes que cobrem RN10-RN15 (`functions/test/integration/pedidosPagamento.test.ts`, `webhooksStripe.test.ts`) passam (SDK do Stripe mockado). Os segredos abaixo já estão configurados no Firebase Secret Manager do projeto real e o webhook já está cadastrado no Dashboard do Stripe. Este projeto **nunca processa dinheiro real**: todas as chaves e o Dashboard usados são sempre em **modo teste/sandbox** do Stripe.
 
 ### Como obter as chaves de teste do Stripe
 
@@ -250,7 +252,7 @@ firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
 # cole o signing secret (whsec_...) gerado ao cadastrar o webhook — ver subseção abaixo
 ```
 
-Os dois segredos precisam ser referenciados na definição da Cloud Function (opção `secrets` do `onRequest`, 2ª geração) quando o Módulo 5/6 for implementado, para ficarem disponíveis como variável de ambiente em produção — mesmo mecanismo documentado na [seção "Variáveis de ambiente e segredos"](#variáveis-de-ambiente-e-segredos) acima.
+Os dois segredos já estão referenciados na definição da Cloud Function (opção `secrets` do `onRequest`, 2ª geração, em `functions/src/index.ts`), disponíveis como variável de ambiente em produção — mesmo mecanismo documentado na [seção "Variáveis de ambiente e segredos"](#variáveis-de-ambiente-e-segredos) acima.
 
 ### Cartões de teste do Stripe
 
@@ -265,11 +267,11 @@ Para testar o fluxo de pagamento manualmente (via `client_secret` retornado por 
 
 ### Configurar a URL do webhook no Dashboard do Stripe (modo teste)
 
-Passo **manual**, feito uma vez por ambiente (dev local com túnel/Stripe CLI, e produção), depois que o Módulo 6 (`POST /webhooks/stripe`) estiver implementado e deployado:
+Passo **manual**, feito uma vez por ambiente (dev local com túnel/Stripe CLI, e produção) — **já feito em produção**, documentado abaixo para referência/reconfiguração:
 
 1. No [Dashboard do Stripe](https://dashboard.stripe.com), com o toggle **"Test mode"** ativado, vá em **Developers > Webhooks > Add endpoint**.
 2. Em **Endpoint URL**, informe a URL pública da function em produção: `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api/webhooks/stripe` (mesmo padrão de URL documentado em "Deploy" acima, path `/webhooks/stripe`).
-3. Em **Events to listen to**, selecione ao menos `payment_intent.succeeded` e `payment_intent.payment_failed` (RN12/RN13 do `SPEC.md`); outros eventos podem ser adicionados sem quebrar nada (RN15/Task 6.4.5 trata tipos não mapeados como no-op).
+3. Em **Events to listen to**, selecione `payment_intent.succeeded`, `payment_intent.payment_failed` e `payment_intent.canceled` (RN12/RN13 do `SPEC.md`); outros eventos podem ser adicionados sem quebrar nada (RN15/Task 6.4.5 trata tipos não mapeados como no-op).
 4. Salve o endpoint. O Stripe exibe o **Signing secret** (`whsec_...`) na página de detalhes do endpoint criado — clique em "Reveal" para visualizá-lo.
 5. Copie esse valor e configure-o em produção com `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET` (comando acima). Se o endpoint for recriado ou o secret for "rolado" (rotate) no Dashboard, repita este passo com o novo valor.
 6. Para testar localmente sem expor o emulador publicamente, use o [Stripe CLI](https://docs.stripe.com/stripe-cli) (`stripe listen --forward-to localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/webhooks/stripe`), que gera seu próprio signing secret de teste temporário para colocar no `.env` local.
