@@ -33,3 +33,9 @@ export class ConflictError extends AppError {
     super(409, "CONFLICT", message);
   }
 }
+
+export class PaymentGatewayError extends AppError {
+  constructor(message = "Erro no gateway de pagamento.") {
+    super(502, "PAYMENT_GATEWAY_ERROR", message);
+  }
+}

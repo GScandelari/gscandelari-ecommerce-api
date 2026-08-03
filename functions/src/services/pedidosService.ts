@@ -1,9 +1,10 @@
 import { getAdminApp } from "@/firebaseAdmin";
-import { ForbiddenError, NotFoundError, ValidationError } from "@/errors";
+import { ForbiddenError, NotFoundError, PaymentGatewayError, ValidationError } from "@/errors";
 import { Pedido, PedidoInput, ItemPedido } from "@/models/pedido";
 import { produtosCollection } from "@/repositories/produtosRepository";
 import { pedidosCollection } from "@/repositories/pedidosRepository";
 import { isValidTransition, PedidoStatus } from "@/services/pedidos.statusMachine";
+import { criarPaymentIntent } from "@/services/stripeService";
 
 export interface CriarPedidoItemInput {
   produtoId: string;
@@ -65,12 +66,44 @@ export async function criarPedido(
       itens: itensPedido,
       total,
       status: "pendente",
+      // Fase 2 (Task 5.2.1): campos de pagamento nascem "vazios" na mesma
+      // transacao - a PaymentIntent e criada DEPOIS, fora dela (ver
+      // criarPedidoComPagamento), porque chamada de rede nao pode estar
+      // dentro de db.runTransaction (pode ser reexecutada em conflito).
+      paymentIntentId: null,
+      paymentClientSecret: null,
+      paymentStatus: "aguardando_pagamento",
       createdAt: now,
       updatedAt: now,
     };
     tx.set(pedidoRef, data);
     return { id: pedidoRef.id, ...data };
   });
+}
+
+/**
+ * RN10: orquestra a criacao do pedido (transacao Firestore existente,
+ * inalterada) com a criacao da PaymentIntent no Stripe (fora da
+ * transacao). Em falha do Stripe, compensa cancelando o pedido ja criado
+ * e restaurando o estoque, respondendo como PaymentGatewayError (502).
+ */
+export async function criarPedidoComPagamento(
+  clienteId: string,
+  itens: CriarPedidoItemInput[],
+): Promise<Pedido> {
+  const pedido = await criarPedido(clienteId, itens);
+
+  try {
+    const { paymentIntentId, clientSecret } = await criarPaymentIntent(pedido);
+    await pedidosCollection().doc(pedido.id).update({
+      paymentIntentId,
+      paymentClientSecret: clientSecret,
+    });
+    return { ...pedido, paymentIntentId, paymentClientSecret: clientSecret };
+  } catch {
+    await cancelarPedidoPorFalhaPagamento(pedido.id);
+    throw new PaymentGatewayError("Nao foi possivel iniciar o pagamento do pedido.");
+  }
 }
 
 async function restaurarEstoque(
@@ -148,5 +181,60 @@ export async function cancelarPedidoCliente(pedidoId: string, clienteId: string)
     const data: PedidoInput = { ...pedido, status: "cancelado", updatedAt: new Date() };
     tx.set(pedidoRef, data);
     return { id: pedidoRef.id, ...data };
+  });
+}
+
+/**
+ * RN12: chamada pelo webhook (payment_intent.succeeded) ou pela propria
+ * criacao do pedido em caso de sucesso imediato. Noop (RN15) se o pedido
+ * nao existir ou nao estiver mais `pendente` - idempotente por construcao,
+ * sem checagem de papel (a autorizacao do webhook e a assinatura Stripe,
+ * validada na camada de rota, nao Firebase Auth).
+ */
+export async function confirmarPagamentoPedido(pedidoId: string): Promise<void> {
+  const db = getAdminApp().firestore();
+  const pedidoRef = pedidosCollection().doc(pedidoId);
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(pedidoRef);
+    if (!snap.exists) return;
+    const pedido = snap.data() as PedidoInput;
+    if (pedido.status !== "pendente") return;
+
+    const data: PedidoInput = {
+      ...pedido,
+      status: "confirmado",
+      paymentStatus: "pago",
+      updatedAt: new Date(),
+    };
+    tx.set(pedidoRef, data);
+  });
+}
+
+/**
+ * RN13: cancela por falha de pagamento e restaura estoque - reaproveitada
+ * tanto pelo webhook (payment_intent.payment_failed/canceled) quanto pela
+ * compensacao de criarPedidoComPagamento quando o Stripe falha na criacao.
+ * Noop (RN15) se o pedido nao existir ou nao estiver mais `pendente`.
+ */
+export async function cancelarPedidoPorFalhaPagamento(pedidoId: string): Promise<void> {
+  const db = getAdminApp().firestore();
+  const pedidoRef = pedidosCollection().doc(pedidoId);
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(pedidoRef);
+    if (!snap.exists) return;
+    const pedido = snap.data() as PedidoInput;
+    if (pedido.status !== "pendente") return;
+
+    await restaurarEstoque(tx, pedido.itens);
+
+    const data: PedidoInput = {
+      ...pedido,
+      status: "cancelado",
+      paymentStatus: "falhou",
+      updatedAt: new Date(),
+    };
+    tx.set(pedidoRef, data);
   });
 }

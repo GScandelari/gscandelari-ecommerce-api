@@ -3,12 +3,20 @@ import cors from "cors";
 import swaggerUi from "swagger-ui-express";
 import produtosRouter from "@/routes/produtos.routes";
 import pedidosRouter from "@/routes/pedidos.routes";
+import webhooksRouter from "@/routes/webhooks.routes";
 import { errorHandler } from "@/middlewares/errorHandler";
 import openapiDocument from "@/openapi.json";
 
 export function createApp(): Express {
   const app = express();
   app.use(cors());
+
+  // Fase 2 / Task 6.1.1: a rota do webhook precisa do corpo CRU (Buffer)
+  // para validar a assinatura do Stripe, entao e montada ANTES do
+  // express.json() global (o parser de body so pode ser consumido uma vez
+  // por request; o proprio router aplica express.raw() so nessa rota).
+  app.use("/webhooks", webhooksRouter);
+
   app.use(express.json());
 
   // Sanity check de infraestrutura (Task 1.2.2 / 3.1.2 / 1.2.3). APP_ENV

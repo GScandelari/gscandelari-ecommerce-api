@@ -6,18 +6,22 @@ import { asyncHandler } from "@/utils/asyncHandler";
 import { alterarStatusSchema, criarPedidoSchema } from "@/schemas/pedido.schema";
 import { ForbiddenError, NotFoundError } from "@/errors";
 import { getPedido, listPedidos } from "@/repositories/pedidosRepository";
-import { alterarStatusAdmin, cancelarPedidoCliente, criarPedido } from "@/services/pedidosService";
+import {
+  alterarStatusAdmin,
+  cancelarPedidoCliente,
+  criarPedidoComPagamento,
+} from "@/services/pedidosService";
 
 const router = Router();
 
 router.use(authenticate);
 
-// Task 2.6.2 - RN02, RN03, RN04, RN09
+// Task 2.6.2 / 5.3.4 - RN02, RN03, RN04, RN09, RN10
 router.post(
   "/",
   validate(criarPedidoSchema),
   asyncHandler(async (req, res) => {
-    const pedido = await criarPedido(req.user!.uid, req.body.itens);
+    const pedido = await criarPedidoComPagamento(req.user!.uid, req.body.itens);
     res.status(201).json(pedido);
   }),
 );

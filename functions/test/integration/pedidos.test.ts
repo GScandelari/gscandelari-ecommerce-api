@@ -1,3 +1,9 @@
+// Import DEVE vir antes de "../../src/app": a partir da Fase 2, POST
+// /pedidos passa a chamar o Stripe (RN10) via @/stripeClient - sem este
+// mock, os testes desta suite (que nao configuram um valor especifico de
+// PaymentIntent) tentariam usar o cliente Stripe real e falhariam por
+// falta de STRIPE_SECRET_KEY no ambiente de teste.
+import { mockPaymentIntentsCreate, resetStripeMocks } from "../helpers/mockStripe";
 import request from "supertest";
 import app from "../../src/app";
 import { createTestUser, TestUser } from "../helpers/testAuth";
@@ -46,6 +52,18 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
     adminUser = await createTestUser({ admin: true });
     clienteA = await createTestUser({ admin: false });
     clienteB = await createTestUser({ admin: false });
+  });
+
+  beforeEach(() => {
+    resetStripeMocks();
+    // Valor padrao generico: esta suite testa as regras de Pedido da Fase
+    // 1 (RN02-RN09/RN07a), nao o conteudo do pagamento em si (isso e
+    // testado em pedidosPagamento.test.ts) - qualquer PaymentIntent valida
+    // basta para o fluxo de criacao nao falhar.
+    mockPaymentIntentsCreate.mockResolvedValue({
+      id: "pi_fase1_default",
+      client_secret: "secret_fase1_default",
+    });
   });
 
   afterEach(async () => {
