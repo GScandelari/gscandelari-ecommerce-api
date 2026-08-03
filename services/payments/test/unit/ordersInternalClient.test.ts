@@ -72,7 +72,9 @@ describe("orders.internalClient - RN17 (Modulo 9 - Epico 9.3 - Task 9.3.2)", () 
   it("propaga erro se ORDERS_BASE_URL nao estiver configurada", async () => {
     delete process.env.ORDERS_BASE_URL;
 
-    await expect(confirmarPagamentoPedido("pedido-000")).rejects.toThrow("ORDERS_BASE_URL nao configurada.");
+    await expect(confirmarPagamentoPedido("pedido-000")).rejects.toThrow(
+      "ORDERS_BASE_URL nao configurada.",
+    );
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });

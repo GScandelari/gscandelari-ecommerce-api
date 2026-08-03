@@ -11,7 +11,11 @@ const BEARER_PREFIX = "Bearer ";
  * `aud` = URL do proprio servico, e `email` do chamador numa allow-list.
  * Duplicado identico em Orders e Payments.
  */
-export async function verifyInternalToken(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function verifyInternalToken(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
   // Task 9.1.5: conveniencia de dev - o metadata server do GCP (usado por
   // mintInternalToken/verifyIdToken) nao existe no Emulator Suite. Dupla
   // trava de seguranca: so tem efeito se SKIP_INTERNAL_AUTH=true E
@@ -40,7 +44,9 @@ export async function verifyInternalToken(req: Request, res: Response, next: Nex
     const payload = ticket.getPayload();
 
     if (!payload || payload.aud !== selfUrl || payload.email !== allowedEmail) {
-      res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Token interno invalido." } });
+      res
+        .status(401)
+        .json({ error: { code: "UNAUTHENTICATED", message: "Token interno invalido." } });
       return;
     }
 

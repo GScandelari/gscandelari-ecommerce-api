@@ -60,7 +60,9 @@ describe("API Gateway (Firebase Hosting rewrites) - RN20 (Modulo 11 / Task 12.4.
     const config = loadFirebaseJson();
     const rewrites = config.hosting?.rewrites ?? [];
 
-    const referenciasNotifications = rewrites.filter((r) => `${functionIdOf(r)}`.includes("notifications"));
+    const referenciasNotifications = rewrites.filter((r) =>
+      `${functionIdOf(r)}`.includes("notifications"),
+    );
 
     expect(referenciasNotifications).toHaveLength(0);
   });

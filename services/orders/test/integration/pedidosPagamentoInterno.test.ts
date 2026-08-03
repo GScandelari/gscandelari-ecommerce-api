@@ -2,7 +2,10 @@
 // sobre "@/services/payments.internalClient" seja registrado antes de
 // qualquer modulo do Modulo 9 (pedidosService.ts, etc.) tentar carregar o
 // cliente HTTP interno real.
-import { mockCriarPaymentIntent, resetPaymentsInternalClientMocks } from "../helpers/mockPaymentsInternalClient";
+import {
+  mockCriarPaymentIntent,
+  resetPaymentsInternalClientMocks,
+} from "../helpers/mockPaymentsInternalClient";
 import request from "supertest";
 import app from "../../src/app";
 import { createTestUser, TestUser } from "../helpers/testAuth";

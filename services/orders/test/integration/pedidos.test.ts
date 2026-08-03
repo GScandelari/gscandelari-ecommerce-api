@@ -4,7 +4,10 @@
 // @/stripeClient diretamente. Sem este mock, os testes desta suite (que
 // nao configuram um valor especifico de PaymentIntent) tentariam chamar
 // Payments de verdade e falhariam por falta de PAYMENTS_BASE_URL/rede.
-import { mockCriarPaymentIntent, resetPaymentsInternalClientMocks } from "../helpers/mockPaymentsInternalClient";
+import {
+  mockCriarPaymentIntent,
+  resetPaymentsInternalClientMocks,
+} from "../helpers/mockPaymentsInternalClient";
 import request from "supertest";
 import app from "../../src/app";
 import { createTestUser, TestUser } from "../helpers/testAuth";

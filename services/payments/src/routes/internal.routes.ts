@@ -15,8 +15,15 @@ router.post(
   "/payment-intents",
   asyncHandler(async (req, res) => {
     const { pedidoId, total } = req.body ?? {};
-    if (typeof pedidoId !== "string" || pedidoId.length === 0 || typeof total !== "number" || total <= 0) {
-      throw new ValidationError("Payload invalido: esperado { pedidoId: string, total: number > 0 }.");
+    if (
+      typeof pedidoId !== "string" ||
+      pedidoId.length === 0 ||
+      typeof total !== "number" ||
+      total <= 0
+    ) {
+      throw new ValidationError(
+        "Payload invalido: esperado { pedidoId: string, total: number > 0 }.",
+      );
     }
 
     try {

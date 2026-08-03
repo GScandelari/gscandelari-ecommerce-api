@@ -38,7 +38,9 @@ describe("Middleware verifyInternalToken (em Payments, recebe chamadas de Orders
 
   it("RN18: assinatura invalida (verifyIdToken lanca excecao) -> 401", async () => {
     mockVerifyIdToken.mockRejectedValue(new Error("assinatura invalida (simulado)"));
-    const { req, res, next } = mockReqRes({ authorization: "Bearer token-com-assinatura-invalida" });
+    const { req, res, next } = mockReqRes({
+      authorization: "Bearer token-com-assinatura-invalida",
+    });
 
     await verifyInternalToken(req, res, next as any);
 
@@ -48,7 +50,10 @@ describe("Middleware verifyInternalToken (em Payments, recebe chamadas de Orders
 
   it("RN18: aud (audience) do token nao bate com a URL do proprio servico -> 401", async () => {
     mockVerifyIdToken.mockResolvedValue({
-      getPayload: () => ({ aud: "https://outro-servico-nao-e-este.a.run.app", email: CALLER_EMAIL }),
+      getPayload: () => ({
+        aud: "https://outro-servico-nao-e-este.a.run.app",
+        email: CALLER_EMAIL,
+      }),
     });
     const { req, res, next } = mockReqRes({ authorization: "Bearer token-aud-errado" });
 

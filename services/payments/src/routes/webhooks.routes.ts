@@ -3,7 +3,10 @@ import { getStripeClient } from "@/stripeClient";
 import { ValidationError } from "@/errors";
 import { asyncHandler } from "@/utils/asyncHandler";
 import { jaProcessado, registrarEventoProcessado } from "@/repositories/stripeEventsRepository";
-import { cancelarPedidoPorFalhaPagamento, confirmarPagamentoPedido } from "@/services/orders.internalClient";
+import {
+  cancelarPedidoPorFalhaPagamento,
+  confirmarPagamentoPedido,
+} from "@/services/orders.internalClient";
 
 interface StripeEventObjectComMetadata {
   id: string;
@@ -53,7 +56,10 @@ router.post(
     if (pedidoId) {
       if (event.type === "payment_intent.succeeded") {
         await confirmarPagamentoPedido(pedidoId);
-      } else if (event.type === "payment_intent.payment_failed" || event.type === "payment_intent.canceled") {
+      } else if (
+        event.type === "payment_intent.payment_failed" ||
+        event.type === "payment_intent.canceled"
+      ) {
         await cancelarPedidoPorFalhaPagamento(pedidoId);
       }
     }

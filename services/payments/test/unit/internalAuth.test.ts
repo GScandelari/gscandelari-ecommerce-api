@@ -1,6 +1,10 @@
 // Este import DEVE vir antes de `../../src/internalAuth` para que o mock de
 // `google-auth-library` seja registrado antes de qualquer `require` real.
-import { mockFetchIdToken, mockGetIdTokenClient, resetGoogleAuthLibraryMocks } from "../helpers/mockGoogleAuthLibrary";
+import {
+  mockFetchIdToken,
+  mockGetIdTokenClient,
+  resetGoogleAuthLibraryMocks,
+} from "../helpers/mockGoogleAuthLibrary";
 // Task 9.1.1 (Modulo 9 - AINDA NAO IMPLEMENTADO): `mintInternalToken`,
 // duplicado em Payments (Decisao tecnica 4). Import falhara ate
 // `src/internalAuth.ts` ser criado em services/payments - RN17.

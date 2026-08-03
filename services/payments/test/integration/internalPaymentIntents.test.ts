@@ -32,7 +32,9 @@ describe("POST /internal/payment-intents (Payments) - RN16, RN18 (Task 9.2.1 / 1
 
   // Task 12.2.4
   it("RN18: sem header Authorization -> 401, Stripe nunca chamado", async () => {
-    const res = await request(app).post("/internal/payment-intents").send({ pedidoId: "p1", total: 10 });
+    const res = await request(app)
+      .post("/internal/payment-intents")
+      .send({ pedidoId: "p1", total: 10 });
 
     expect(res.status).toBe(401);
     expect(mockPaymentIntentsCreate).not.toHaveBeenCalled();
@@ -52,8 +54,13 @@ describe("POST /internal/payment-intents (Payments) - RN16, RN18 (Task 9.2.1 / 1
 
   // Task 9.2.1
   it("RN16: token interno valido + Stripe mockado com sucesso -> 200 com paymentIntentId/clientSecret, contrato reduzido a {pedidoId, total}", async () => {
-    mockVerifyIdToken.mockResolvedValue({ getPayload: () => ({ aud: SELF_URL, email: CALLER_EMAIL }) });
-    mockPaymentIntentsCreate.mockResolvedValue({ id: "pi_int_1", client_secret: "pi_int_1_secret" });
+    mockVerifyIdToken.mockResolvedValue({
+      getPayload: () => ({ aud: SELF_URL, email: CALLER_EMAIL }),
+    });
+    mockPaymentIntentsCreate.mockResolvedValue({
+      id: "pi_int_1",
+      client_secret: "pi_int_1_secret",
+    });
 
     const res = await request(app)
       .post("/internal/payment-intents")
@@ -69,7 +76,9 @@ describe("POST /internal/payment-intents (Payments) - RN16, RN18 (Task 9.2.1 / 1
 
   // Task 9.2.1
   it("RN16: token interno valido + Stripe mockado falhando -> 502 (PaymentGatewayError local de Payments)", async () => {
-    mockVerifyIdToken.mockResolvedValue({ getPayload: () => ({ aud: SELF_URL, email: CALLER_EMAIL }) });
+    mockVerifyIdToken.mockResolvedValue({
+      getPayload: () => ({ aud: SELF_URL, email: CALLER_EMAIL }),
+    });
     mockPaymentIntentsCreate.mockRejectedValue(new Error("stripe indisponivel (simulado)"));
 
     const res = await request(app)

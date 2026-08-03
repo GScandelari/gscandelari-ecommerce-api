@@ -37,11 +37,18 @@ interface PedidoDocFake {
  * (e opcionalmente `.id`), entao nao ha necessidade de depender do tipo
  * completo do Admin SDK aqui.
  */
-function makeSnapshot(data: PedidoDocFake | undefined): { id: string; data: () => PedidoDocFake | undefined } {
+function makeSnapshot(data: PedidoDocFake | undefined): {
+  id: string;
+  data: () => PedidoDocFake | undefined;
+} {
   return { id: "pedido-teste-1", data: () => data };
 }
 
-function makeEvent(before: PedidoDocFake | undefined, after: PedidoDocFake | undefined, pedidoId = "pedido-teste-1") {
+function makeEvent(
+  before: PedidoDocFake | undefined,
+  after: PedidoDocFake | undefined,
+  pedidoId = "pedido-teste-1",
+) {
   return {
     data: { before: makeSnapshot(before), after: makeSnapshot(after) },
     params: { pedidoId },
@@ -89,8 +96,18 @@ describe("Trigger onPedidoStatusChange - RN19 (Modulo 10 - Epico 10.2 / Task 12.
 
   // Task 12.3.3 / Decisao tecnica 5
   it("RN19 (Decisao tecnica 5): update que NAO altera status (ex.: so grava paymentIntentId) nao dispara e-mail", async () => {
-    const before: PedidoDocFake = { clienteId: cliente.uid, status: "pendente", total: 60, paymentIntentId: null };
-    const after: PedidoDocFake = { clienteId: cliente.uid, status: "pendente", total: 60, paymentIntentId: "pi_123" };
+    const before: PedidoDocFake = {
+      clienteId: cliente.uid,
+      status: "pendente",
+      total: 60,
+      paymentIntentId: null,
+    };
+    const after: PedidoDocFake = {
+      clienteId: cliente.uid,
+      status: "pendente",
+      total: 60,
+      paymentIntentId: "pi_123",
+    };
 
     await onPedidoStatusChange.run(makeEvent(before, after));
 
@@ -131,8 +148,16 @@ describe("Trigger onPedidoStatusChange - RN19 (Modulo 10 - Epico 10.2 / Task 12.
   });
 
   it("RN19 (clausula best-effort): clienteId sem usuario correspondente no Auth Emulator -> best-effort, sem excecao nao tratada", async () => {
-    const before: PedidoDocFake = { clienteId: "uid-inexistente-no-auth-emulator", status: "pendente", total: 60 };
-    const after: PedidoDocFake = { clienteId: "uid-inexistente-no-auth-emulator", status: "confirmado", total: 60 };
+    const before: PedidoDocFake = {
+      clienteId: "uid-inexistente-no-auth-emulator",
+      status: "pendente",
+      total: 60,
+    };
+    const after: PedidoDocFake = {
+      clienteId: "uid-inexistente-no-auth-emulator",
+      status: "confirmado",
+      total: 60,
+    };
 
     await onPedidoStatusChange.run(makeEvent(before, after));
 

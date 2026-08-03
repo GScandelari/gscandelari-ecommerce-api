@@ -34,11 +34,15 @@ jest.mock(
     verifyInternalToken: (req: Request, res: Response, next: NextFunction) => {
       const header = req.headers.authorization;
       if (!header || !header.startsWith("Bearer ")) {
-        res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Token interno ausente." } });
+        res
+          .status(401)
+          .json({ error: { code: "UNAUTHENTICATED", message: "Token interno ausente." } });
         return;
       }
       if (!tokenValido) {
-        res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Token interno invalido." } });
+        res
+          .status(401)
+          .json({ error: { code: "UNAUTHENTICATED", message: "Token interno invalido." } });
         return;
       }
       next();

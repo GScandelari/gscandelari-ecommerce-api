@@ -5,8 +5,14 @@
 // arquivo tambem exercita Firestore real via pedidosService, e mockar o
 // pacote `google-auth-library` inteiro quebraria a autenticacao interna do
 // proprio Admin SDK do Firestore (ver comentario em mockVerifyInternalToken.ts).
-import { mockCriarPaymentIntent, resetPaymentsInternalClientMocks } from "../helpers/mockPaymentsInternalClient";
-import { resetMockVerifyInternalToken, setInternalTokenValido } from "../helpers/mockVerifyInternalToken";
+import {
+  mockCriarPaymentIntent,
+  resetPaymentsInternalClientMocks,
+} from "../helpers/mockPaymentsInternalClient";
+import {
+  resetMockVerifyInternalToken,
+  setInternalTokenValido,
+} from "../helpers/mockVerifyInternalToken";
 import request from "supertest";
 import app from "../../src/app";
 import { createTestUser, TestUser } from "../helpers/testAuth";
@@ -95,13 +101,17 @@ describe("Endpoints internos de Orders (chamados por Payments) - RN17, RN18 (Mod
 
   // Task 12.2.4
   it("RN18: POST /internal/pedidos/:id/confirmar-pagamento sem Authorization -> 401", async () => {
-    const res = await request(app).post("/internal/pedidos/qualquer-id/confirmar-pagamento").send({});
+    const res = await request(app)
+      .post("/internal/pedidos/qualquer-id/confirmar-pagamento")
+      .send({});
     expect(res.status).toBe(401);
   });
 
   // Task 12.2.4
   it("RN18: POST /internal/pedidos/:id/cancelar-por-falha-pagamento sem Authorization -> 401", async () => {
-    const res = await request(app).post("/internal/pedidos/qualquer-id/cancelar-por-falha-pagamento").send({});
+    const res = await request(app)
+      .post("/internal/pedidos/qualquer-id/cancelar-por-falha-pagamento")
+      .send({});
     expect(res.status).toBe(401);
   });
 
@@ -151,7 +161,11 @@ describe("Endpoints internos de Orders (chamados por Payments) - RN17, RN18 (Mod
       .send({});
 
     expect(res.status).toBe(200);
-    const snap = await getAdminApp().firestore().collection("pedidos").doc("pedido-que-nao-existe").get();
+    const snap = await getAdminApp()
+      .firestore()
+      .collection("pedidos")
+      .doc("pedido-que-nao-existe")
+      .get();
     expect(snap.exists).toBe(false);
   });
 

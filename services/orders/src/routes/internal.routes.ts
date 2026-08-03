@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { verifyInternalToken } from "@/middlewares/verifyInternalToken";
 import { asyncHandler } from "@/utils/asyncHandler";
-import { cancelarPedidoPorFalhaPagamento, confirmarPagamentoPedido } from "@/services/pedidosService";
+import {
+  cancelarPedidoPorFalhaPagamento,
+  confirmarPagamentoPedido,
+} from "@/services/pedidosService";
 
 const router = Router();
 

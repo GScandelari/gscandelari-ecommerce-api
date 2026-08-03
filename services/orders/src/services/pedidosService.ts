@@ -17,7 +17,10 @@ interface ProdutoDoc {
   estoque: number;
 }
 
-export async function criarPedido(clienteId: string, itens: CriarPedidoItemInput[]): Promise<Pedido> {
+export async function criarPedido(
+  clienteId: string,
+  itens: CriarPedidoItemInput[],
+): Promise<Pedido> {
   const db = getAdminApp().firestore();
   const pedidoRef = pedidosCollection().doc();
   const produtosCol = produtosCollection();
@@ -94,7 +97,10 @@ export async function criarPedidoComPagamento(
   }
 }
 
-async function restaurarEstoque(tx: FirebaseFirestore.Transaction, itens: ItemPedido[]): Promise<void> {
+async function restaurarEstoque(
+  tx: FirebaseFirestore.Transaction,
+  itens: ItemPedido[],
+): Promise<void> {
   const produtosCol = produtosCollection();
   const produtoRefs = itens.map((item) => produtosCol.doc(item.produtoId));
   const produtoSnaps = await Promise.all(produtoRefs.map((ref) => tx.get(ref)));
@@ -106,7 +112,10 @@ async function restaurarEstoque(tx: FirebaseFirestore.Transaction, itens: ItemPe
   });
 }
 
-export async function alterarStatusAdmin(pedidoId: string, novoStatus: PedidoStatus): Promise<Pedido> {
+export async function alterarStatusAdmin(
+  pedidoId: string,
+  novoStatus: PedidoStatus,
+): Promise<Pedido> {
   const db = getAdminApp().firestore();
   const pedidoRef = pedidosCollection().doc(pedidoId);
 

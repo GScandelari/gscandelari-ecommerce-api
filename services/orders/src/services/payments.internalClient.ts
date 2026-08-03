@@ -11,7 +11,10 @@ export interface CriarPaymentIntentResult {
  * continua sendo o unico dono do tipo `Pedido` completo, Payments nunca
  * precisa conhece-lo.
  */
-export async function criarPaymentIntent(pedidoId: string, total: number): Promise<CriarPaymentIntentResult> {
+export async function criarPaymentIntent(
+  pedidoId: string,
+  total: number,
+): Promise<CriarPaymentIntentResult> {
   const paymentsBaseUrl = process.env.PAYMENTS_BASE_URL;
   if (!paymentsBaseUrl) {
     throw new Error("PAYMENTS_BASE_URL nao configurada.");

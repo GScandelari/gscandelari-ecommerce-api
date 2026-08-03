@@ -31,12 +31,16 @@ describe("stripeService.criarPaymentIntent(pedidoId, total) - contrato simplific
 
     await criarPaymentIntent("pedido-999", 19.995);
 
-    expect(mockPaymentIntentsCreate).toHaveBeenCalledWith(expect.objectContaining({ amount: 2000 }));
+    expect(mockPaymentIntentsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 2000 }),
+    );
   });
 
   it("propaga o erro do Stripe para o chamador (traduzido em PaymentGatewayError pela rota interna, RN16)", async () => {
     mockPaymentIntentsCreate.mockRejectedValue(new Error("stripe indisponivel (simulado)"));
 
-    await expect(criarPaymentIntent("pedido-456", 10)).rejects.toThrow("stripe indisponivel (simulado)");
+    await expect(criarPaymentIntent("pedido-456", 10)).rejects.toThrow(
+      "stripe indisponivel (simulado)",
+    );
   });
 });
