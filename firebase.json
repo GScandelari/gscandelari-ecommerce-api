@@ -12,11 +12,61 @@
         "firebase-debug.log",
         "firebase-debug.*.log"
       ]
+    },
+    {
+      "source": "services/orders",
+      "codebase": "orders",
+      "runtime": "nodejs20",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "test",
+        "*.test.ts",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    },
+    {
+      "source": "services/payments",
+      "codebase": "payments",
+      "runtime": "nodejs20",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "test",
+        "*.test.ts",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    },
+    {
+      "source": "services/notifications",
+      "codebase": "notifications",
+      "runtime": "nodejs20",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "test",
+        "*.test.ts",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
     }
   ],
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/produtos/**", "function": "orders-api" },
+      { "source": "/pedidos/**", "function": "orders-api" },
+      { "source": "/health", "function": "orders-api" },
+      { "source": "/docs/**", "function": "orders-api" },
+      { "source": "/webhooks/stripe", "function": "payments-api" }
+    ]
   },
   "emulators": {
     "auth": {
@@ -27,6 +77,9 @@
     },
     "functions": {
       "port": 5001
+    },
+    "hosting": {
+      "port": 5000
     },
     "ui": {
       "enabled": true,
