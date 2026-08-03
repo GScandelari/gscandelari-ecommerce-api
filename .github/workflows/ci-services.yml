@@ -1,0 +1,90 @@
+name: CI - Serviços (Fase 3)
+
+# Implementa a seção 4 "Requisitos de DevOps & Doc" da Fase 3 (SPEC.md) e o
+# item "Fora de escopo desta rodada (delegado ao devops-tech-writer)" da
+# seção Fase 3 do BACKLOG.md: lint/build/test independentes para cada um
+# dos 3 novos codebases (services/orders, services/payments,
+# services/notifications), SEM afetar `ci.yml`/`deploy.yml` — esses dois
+# continuam cuidando exclusivamente de `functions/` (Fase 1+2), hoje
+# deployado e servindo tráfego real em produção.
+#
+# IMPORTANTE — estado esperado nesta fase: os 3 serviços ainda são só
+# scaffold (package.json/tsconfig/jest.config) + suíte de testes TDD dos
+# Módulos 9-12 do BACKLOG.md, propositalmente "vermelha" (`src/` de cada
+# serviço ainda está vazio; nenhum `eslint.config` por serviço existe
+# ainda — Task 8.1.2, Módulo 8). Este workflow roda mesmo assim, de
+# propósito: ele existe para ficar verde incrementalmente conforme cada
+# módulo (8 a 12) for implementado nesta mesma branch
+# (feat/fase-3-microservicos). Ele NÃO é (ainda) um check obrigatório de
+# nenhuma branch protection, e sua falha não bloqueia `ci.yml`/`deploy.yml`
+# nem a branch `main` (que continua protegida só pelo check de `ci.yml`,
+# ver CONTRIBUTING.md).
+#
+# NENHUM DEPLOY é feito por este workflow. O deploy real dos novos
+# codebases (Épico 8.6 do BACKLOG.md — corte de produção) é a última etapa
+# da Fase 3 e exige aprovação explícita do usuário antes de qualquer
+# execução; um workflow de deploy dedicado só será criado quando essa
+# etapa for de fato disparada. Ver README.md > "Arquitetura da Fase 3
+# (Microsserviços) — em desenvolvimento" > "Corte de produção" para o
+# passo a passo completo.
+
+on:
+  push:
+    branches: [feat/fase-3-microservicos]
+    paths:
+      - "services/**"
+      - ".github/workflows/ci-services.yml"
+  pull_request:
+    branches: [main, feat/fase-3-microservicos]
+    paths:
+      - "services/**"
+      - ".github/workflows/ci-services.yml"
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: Lint, build e testes — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [orders, payments, notifications]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Configurar Java (necessário para Firestore/Auth Emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Instalar dependências (npm ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatação (Prettier)
+        run: npm run format:check
+
+      - name: Build (TypeScript)
+        run: npm run build
+
+      - name: Testes (Jest + Supertest) contra o Firebase Emulator Suite
+        # Mesmo padrão de functions/ci.yml: firebase-tools é devDependency
+        # de cada serviço (via firebase-tools em npx, resolvido pelo
+        # package-lock.json), rodando contra o projeto demo
+        # "demo-gscandelari-ecommerce-api" (Auth + Firestore Emulator).
+        # Nenhuma credencial nem projeto Firebase real é usado aqui.
+        run: npm run test:coverage:emulator

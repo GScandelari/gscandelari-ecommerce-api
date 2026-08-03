@@ -4,7 +4,7 @@ API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, 
 
 Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
-> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) ainda não faz parte deste repositório/spec.
+> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **em desenvolvimento na branch `feat/fase-3-microservicos`** — scaffold e suíte de testes TDD dos 3 novos serviços já commitados, implementação em andamento. A **produção real não foi alterada**: o monólito desta Fase 1+2 (`functions/`, codebase `default`) continua deployado e servindo 100% do tráfego real (inclusive o webhook do Stripe) sem interrupção, até o corte de produção ser deliberadamente executado como última etapa da Fase 3. Ver [Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento) abaixo.
 
 ## Estado atual do projeto
 
@@ -14,6 +14,8 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 - **Módulo 4 (este documento + CI/CD)**: concluído. Git, CI/CD, README e estratégia de deploy documentados.
 
 **Fase 2 (integração de pagamento via Stripe): concluída e deployada em produção.** `POST /pedidos` cria automaticamente uma PaymentIntent no Stripe (modo teste); `POST /webhooks/stripe` confirma ou cancela pedidos automaticamente via evento assinado (RN10-RN15), com idempotência. 63/63 testes passando (49 Fase 1 + 14 Fase 2, zero regressão), CI verde no GitHub Actions. Os segredos `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` já estão configurados no Firebase Secret Manager do projeto real e o deploy foi validado de ponta a ponta via `workflow_dispatch`.
+
+**Fase 3 (microsserviços): em desenvolvimento, branch `feat/fase-3-microservicos`, ainda não mesclada em `main`.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). Estado atual: scaffold de cada serviço (`package.json`, `tsconfig`, `jest.config`) e a suíte de testes TDD dos Módulos 9-12 do `BACKLOG.md` já commitados nesta branch — propositalmente "vermelha" (`src/` de cada serviço ainda vazio), aguardando a implementação dos Módulos 8-11. `firebase.json` ainda declara só o codebase `default`; a produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento).
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -28,6 +30,7 @@ Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de
 - [CI/CD](#cicd)
 - [Deploy](#deploy)
 - [Integração de pagamento (Stripe) — Fase 2](#integração-de-pagamento-stripe--fase-2)
+- [Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento)
 - [Contribuindo](#contribuindo)
 
 ## Pré-requisitos
@@ -173,14 +176,24 @@ npm run format:check   # Prettier (use `npm run format` para corrigir)
     ├── package.json
     ├── tsconfig.json / tsconfig.build.json
     └── jest.config.js            # coverage threshold 70%
+
+└── services/                  # Fase 3 (microsserviços) — EM DESENVOLVIMENTO,
+                                # branch feat/fase-3-microservicos, não deployado.
+                                # Ver "Arquitetura da Fase 3" para detalhes.
+    ├── orders/                 # produtos + pedidos (RN01-RN09, RN16-RN18)
+    ├── payments/                # Stripe + webhook (RN10-RN15, RN16-RN18)
+    └── notifications/            # e-mail via Resend, sem rota HTTP (RN19-RN20)
+        # cada um com seu próprio package.json/tsconfig/jest.config.js,
+        # src/ (ainda vazio) e test/ (suíte TDD já commitada, "vermelha")
 ```
 
 ## CI/CD
 
 Workflows em `.github/workflows/`:
 
-- **`ci.yml`** — roda em todo Pull Request para `main` e em todo push em `main`. Etapas: `npm ci` (instala dependências), `npm run lint`, `npm run build`, `npm run test:coverage:emulator` (Jest + Supertest contra o Firebase Emulator Suite, com o mesmo `firebase-tools` travado no `package-lock.json`). Nenhuma etapa de CI toca um projeto Firebase real. Este workflow é o check obrigatório configurado na proteção da branch `main` (ver `CONTRIBUTING.md`).
-- **`deploy.yml`** — deploy para Firebase Functions. Ver decisão detalhada abaixo.
+- **`ci.yml`** — roda em todo Pull Request para `main` e em todo push em `main`. Etapas: `npm ci` (instala dependências), `npm run lint`, `npm run build`, `npm run test:coverage:emulator` (Jest + Supertest contra o Firebase Emulator Suite, com o mesmo `firebase-tools` travado no `package-lock.json`). Nenhuma etapa de CI toca um projeto Firebase real. Este workflow é o check obrigatório configurado na proteção da branch `main` (ver `CONTRIBUTING.md`). **Cuida exclusivamente de `functions/` (Fase 1+2, em produção) e não foi alterado pela Fase 3.**
+- **`deploy.yml`** — deploy para Firebase Functions (`functions/`, codebase `default`, Fase 1+2). Ver decisão detalhada abaixo. **Não foi alterado pela Fase 3** — continua deployando somente o monólito atual.
+- **`ci-services.yml`** (novo, Fase 3) — roda lint/build/test **de forma independente** para cada um dos 3 novos serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, disparado em push/PR que tocam `services/**` na branch `feat/fase-3-microservicos` (e em PRs futuros para `main`). Não interfere em `ci.yml`/`deploy.yml` nem nos checks obrigatórios de `main` hoje. **Estado esperado atualmente: vermelho** (lint falha por não haver `eslint.config` por serviço ainda — Task 8.1.2; testes falham por não haver `src/` implementado ainda — Módulos 8-10), refletindo o TDD "vermelho" intencional descrito em [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento). **Não existe workflow de deploy para os novos serviços nesta rodada** — deploy real é a última etapa da Fase 3 (Épico 8.6), disparada manualmente e só com aprovação explícita do usuário.
 
 ## Deploy
 
@@ -275,6 +288,128 @@ Passo **manual**, feito uma vez por ambiente (dev local com túnel/Stripe CLI, e
 4. Salve o endpoint. O Stripe exibe o **Signing secret** (`whsec_...`) na página de detalhes do endpoint criado — clique em "Reveal" para visualizá-lo.
 5. Copie esse valor e configure-o em produção com `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET` (comando acima). Se o endpoint for recriado ou o secret for "rolado" (rotate) no Dashboard, repita este passo com o novo valor.
 6. Para testar localmente sem expor o emulador publicamente, use o [Stripe CLI](https://docs.stripe.com/stripe-cli) (`stripe listen --forward-to localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/webhooks/stripe`), que gera seu próprio signing secret de teste temporário para colocar no `.env` local.
+
+## Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento
+
+> **Status: em desenvolvimento na branch `feat/fase-3-microservicos`, ainda não mesclada em `main`.** Esta seção documenta o alvo da Fase 3 (`SPEC.md` seção "Fase 3", `BACKLOG.md` Módulos 8-12) e o que já existe hoje nesta branch: estrutura de pastas + `package.json`/`tsconfig`/`jest.config` de cada novo serviço, e a suíte de testes TDD dos Módulos 9-12 (propositalmente "vermelha" — `src/` de cada serviço ainda está vazio, aguardando a implementação). **Nada disto está deployado.** A produção real do projeto (`gscandelari-ecommerce-api`) continua rodando exclusivamente o monólito da Fase 1+2 (`functions/`, codebase `default`, function `api`), servindo 100% do tráfego real sem qualquer interrupção — inclusive o webhook do Stripe, cadastrado no Dashboard real (modo teste) apontando para a URL do monólito. `firebase.json` hoje ainda declara só o codebase `default`; estendê-lo para os 4 codebases é a Task 8.1.3 (Módulo 8), ainda não executada.
+
+### Diagrama (arquitetura alvo)
+
+```
+                              ┌───────────────────────────┐
+        cliente final ─────▶ │  Firebase Hosting           │
+                              │  (API Gateway / rewrites)   │
+                              └──────────────┬──────────────┘
+                                             │
+                 ┌────────────────────────────┼────────────────────────────┐
+                 │ /produtos/**, /pedidos/**   │ /webhooks/stripe
+                 ▼                             ▼
+         ┌───────────────┐   HTTP síncrono ┌───────────────┐
+         │    Orders      │◀───────────────▶│   Payments     │
+         │ (codebase      │  ID token Google │ (codebase      │
+         │  "orders")     │  (RN18)          │  "payments")   │
+         │                │                  │                │
+         │ /produtos      │  RN16: cria      │ /webhooks/     │
+         │ /pedidos       │  PaymentIntent    │  stripe        │
+         │ /internal/...  │                  │ /internal/     │
+         │                │  RN17: efetiva    │  payment-      │
+         │                │  transição status  │  intents       │
+         └───────┬────────┘                  └───────┬────────┘
+                 │ única escrita em `pedidos`         │ nunca escreve em `pedidos`
+                 ▼                                    │ (chama Orders via HTTP interno)
+         ┌────────────────────────────────────────────┘
+         │        Firestore: coleções `pedidos`, `produtos`, `stripeEvents`
+         └───────────────────────┬────────────────────────────────────────
+                                 │ onDocumentUpdated("pedidos/{id}")
+                                 │ (assíncrono, fire-and-forget)
+                                 ▼
+                        ┌────────────────────┐
+                        │   Notifications      │
+                        │ (codebase             │
+                        │  "notifications")      │
+                        │ sem rota HTTP pública   │
+                        │ (RN20)                  │
+                        │ envia e-mail via Resend │
+                        │ (confirmado/cancelado)  │
+                        └────────────────────────┘
+```
+
+- **Orders** (`services/orders/`): dono exclusivo da coleção `pedidos`. Expõe `/produtos` e `/pedidos` (público, herdado da Fase 1) e `/internal/pedidos/:id/confirmar-pagamento` + `/internal/pedidos/:id/cancelar-por-falha-pagamento` (interno, só chamado por Payments, protegido por ID token Google — RN17/RN18).
+- **Payments** (`services/payments/`): integração Stripe + webhook (herdado da Fase 2). Expõe `/webhooks/stripe` (público, Dashboard do Stripe) e `/internal/payment-intents` (interno, só chamado por Orders — RN16/RN18). Nunca escreve na coleção `pedidos`.
+- **Notifications** (`services/notifications/`, novo): sem nenhuma rota HTTP pública ou interna (RN20). Reage a mudanças de `status` em `pedidos` via Firestore Trigger (`onDocumentUpdated`) e envia e-mail (Resend, sempre modo teste/sandbox) quando o pedido é confirmado ou cancelado — best-effort, nunca reverte a transição já efetivada por Orders (RN19).
+- **API Gateway** (Firebase Hosting `rewrites`, Módulo 11): único domínio público, roteando `/produtos`/`/pedidos` → Orders e `/webhooks/stripe` → Payments (RN20).
+- Comunicação **Orders ↔ Payments**: HTTP síncrona interna, autenticada via ID token assinado pelo Google (OIDC nativo do GCP, não Firebase Auth) — RN18. Comunicação para **Notifications**: assíncrona via Firestore Trigger, fire-and-forget — assimetria deliberada (ver `BACKLOG.md`, Decisões técnicas da Fase 3).
+
+### Como rodar os 3 novos serviços localmente (Emulator Suite multi-codebase)
+
+1. Instalar as dependências de cada serviço (independentes entre si, cada um com seu próprio `package.json`/`package-lock.json`):
+   ```bash
+   cd services/orders && npm install && cd ../..
+   cd services/payments && npm install && cd ../..
+   cd services/notifications && npm install && cd ../..
+   ```
+2. A partir da Task 8.1.3 do `BACKLOG.md` (Módulo 8, ainda não executada nesta branch), `firebase.json` passa a declarar um array `codebases` com `default` (`functions/`, Fase 1+2), `orders` (`services/orders`), `payments` (`services/payments`) e `notifications` (`services/notifications`). A partir daí, o mesmo comando já usado hoje sobe os 4 codebases simultaneamente a partir da raiz do repositório:
+   ```bash
+   npx firebase-tools emulators:start
+   ```
+   Isso sobe Auth + Firestore + Functions (4 codebases) + Hosting (gateway, Módulo 11) no mesmo Emulator UI (`localhost:4000`), sempre contra o projeto demo `demo-gscandelari-ecommerce-api` — nunca um projeto real, mesma garantia já documentada para a Fase 1+2.
+3. Convenção de nomes de export por codebase (Firebase prefixa automaticamente pelo nome do codebase — Task 8.5.2): `orders-api`, `payments-api`, `notifications-onPedidoStatusChange`, sem colisão com a function `api` do codebase `default`.
+4. Enquanto os Módulos 8-11 (implementação) não estiverem prontos, cada serviço já pode ser exercitado isoladamente via sua própria suíte de testes (TDD — hoje "vermelha", por design, até a implementação correspondente existir):
+   ```bash
+   cd services/orders && npm run lint && npm run build && npm run test:coverage:emulator
+   cd services/payments && npm run lint && npm run build && npm run test:coverage:emulator
+   cd services/notifications && npm run lint && npm run build && npm run test:coverage:emulator
+   ```
+   (`npm run lint` também falha hoje: cada serviço ainda não tem sua própria configuração de ESLint — isso é parte da Task 8.1.2, Módulo 8, ainda não executada.)
+5. Uma vez o fluxo crítico implementado (Módulos 8-11), o roteiro de validação local ponta a ponta é: criar pedido (Orders) → chamada interna síncrona a Payments cria a PaymentIntent → simular evento de webhook do Stripe (CLI `stripe listen`/`stripe trigger` apontando para o Payments local) → chamada interna síncrona de Payments a Orders efetiva a transição de status → Firestore Trigger dispara Notifications → e-mail via Resend (modo sandbox) — tudo dentro do emulador, sem tocar rede/projeto real além dos SDKs mockados nos testes automatizados.
+
+### Segredo novo: `RESEND_API_KEY` (Resend, modo teste/sandbox)
+
+Fase 3 introduz o primeiro segredo do serviço Notifications: a chave de API do [Resend](https://resend.com), usada para enviar o e-mail de confirmação/cancelamento de pedido (RN19). Como os demais segredos do projeto (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, Fase 2), é sempre uma chave de **modo teste/sandbox** — este projeto de portfólio nunca envia e-mail para destinatários reais fora de teste.
+
+**Como obter (gratuito, sem cartão de crédito, sem verificar domínio):**
+1. Crie uma conta em [resend.com/signup](https://resend.com/signup).
+2. No Dashboard, vá em **API Keys > Create API Key**, dê um nome (ex.: `gscandelari-ecommerce-api-dev`) e copie a chave gerada (formato `re_...`). Trate-a com o mesmo cuidado de qualquer outro segredo deste projeto — nunca cole em código, commit, PR, issue ou log.
+3. **Sem verificar um domínio próprio**, o Resend só permite enviar e-mails para o endereço cadastrado na sua própria conta, usando o remetente de sandbox `onboarding@resend.dev` — suficiente para o propósito deste projeto e equivalente, em espírito, ao modo teste/sandbox já usado com o Stripe.
+
+**Configuração local (Emulator Suite)** — mesmo padrão já usado para `STRIPE_SECRET_KEY` na Fase 2:
+1. Copie o arquivo de exemplo:
+   ```bash
+   cd services/notifications
+   cp .env.example .env
+   ```
+2. Edite `services/notifications/.env` e preencha `RESEND_API_KEY` com a chave de teste/sandbox obtida acima.
+3. Os testes Jest de Notifications nunca usam esse valor real: o SDK do Resend é sempre mockado (`services/notifications/test/helpers/mockResend.ts`, mesmo padrão de `mockStripe.ts` da Fase 2) — o valor real só é necessário para o teste manual descrito na próxima seção.
+
+**Configuração em produção (Firebase Secret Manager)** — mesmo mecanismo já usado para os segredos do Stripe:
+```bash
+firebase functions:secrets:set RESEND_API_KEY
+# cole a chave de teste/sandbox (re_...) quando solicitado — nunca fica em texto no shell/histórico
+```
+Será referenciado na definição da Cloud Function `onPedidoStatusChange` (opção `secrets`, 2ª geração) quando a Task 10.1.1 (Módulo 10) for implementada — mesmo mecanismo documentado em [Variáveis de ambiente e segredos](#variáveis-de-ambiente-e-segredos). Este segredo é configurado independentemente dos segredos já existentes de Payments (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`) e nunca precisa ser acessível por Orders ou Payments (princípio de menor privilégio, Task 9.1.4).
+
+### Como testar o fluxo de notificação por e-mail manualmente
+
+Pré-requisito: Módulos 8-10 do `BACKLOG.md` implementados (Orders + Notifications rodando no emulador) e `RESEND_API_KEY` real (modo sandbox) configurada em `services/notifications/.env`.
+
+1. Suba o Emulator Suite multi-codebase (seção acima).
+2. Crie um usuário no Auth Emulator cujo e-mail seja o mesmo cadastrado na sua conta Resend (restrição do modo sandbox sem domínio verificado, ver acima) e crie um pedido autenticado via `POST /pedidos` (Orders).
+3. Efetive a confirmação do pagamento — via admin (`PATCH /pedidos/:id/status` para `confirmado`) ou simulando o webhook do Stripe local apontando para o Payments do emulador.
+4. `onPedidoStatusChange` (Notifications) dispara automaticamente ao detectar a mudança de `status` para `confirmado`; confira o e-mail recebido e/ou o log de envios em [resend.com/emails](https://resend.com/emails) no Dashboard (mostra todo envio, inclusive em modo sandbox).
+5. Repita cancelando um pedido em `pendente` para validar o e-mail de cancelamento.
+6. Confirme a cláusula best-effort de RN19: force uma falha (ex.: `RESEND_API_KEY` inválida) e confirme, pelo Firestore Emulator UI, que o pedido permanece `confirmado`/`cancelado` normalmente — a falha de e-mail nunca reverte ou bloqueia a transição de status já efetivada por Orders.
+
+### Corte de produção — só como última etapa deliberada
+
+A Fase 3 **nunca** decomissiona o monólito como parte do trabalho normal desta branch. A sequência completa está detalhada no Épico 8.6 do `BACKLOG.md`; resumo:
+
+1. Todo o trabalho acontece isolado em `feat/fase-3-microservicos`, validado 100% localmente (Emulator Suite multi-codebase + suíte de testes por serviço) antes de qualquer deploy real.
+2. PR revisado e mesclado em `main` só depois da suíte completa verde (Módulo 12) — o merge em si **não** deploya nada (deploy continua manual via `workflow_dispatch`, decisão herdada das Fases 1/2, Task 4.5.1).
+3. Deploy real dos 3 novos codebases + Hosting com `--only` explícito (`firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`) — **nunca** toca o codebase `default`; a function `api` da Fase 1+2 continua servindo tráfego real ininterruptamente durante e depois deste deploy.
+4. Smoke test completo em produção real pelo **novo** caminho, incluindo a migração manual da URL do webhook no Dashboard do Stripe (modo teste) para a nova URL pública de Payments.
+5. **Somente** depois do smoke test validado, o codebase `default` é removido de `firebase.json` e a function `api` é explicitamente deletada (`firebase functions:delete api`) — decomissionamento deliberado, nunca automático.
+
+Nenhuma das etapas de produção real acima (passos 3-5) é disparada automaticamente por CI. O novo workflow de CI desta fase (`.github/workflows/ci-services.yml`, ver [CI/CD](#cicd)) faz **apenas** lint/build/test dos 3 novos serviços — não existe (propositalmente) nenhum workflow de deploy para eles nesta rodada. Um workflow de deploy só será criado quando o Épico 8.6 for de fato executado, e mesmo assim como gatilho manual (`workflow_dispatch`) sujeito a aprovação explícita do usuário antes de qualquer disparo real, nunca automático.
 
 ## Contribuindo
 
