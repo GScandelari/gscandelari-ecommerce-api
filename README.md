@@ -4,7 +4,7 @@ API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, 
 
 Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
-> Fases futuras (2: gateway de pagamento real; 3: quebra em microsserviços) **não** fazem parte deste repositório/spec ainda — ver `SPEC.md` seção 1.
+> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está especificada em `SPEC.md` e em desenvolvimento. Fase 3 (quebra em microsserviços) ainda não faz parte deste repositório/spec.
 
 ## Estado atual do projeto
 

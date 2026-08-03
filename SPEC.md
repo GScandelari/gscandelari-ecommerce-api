@@ -1,14 +1,18 @@
-## Spec Técnica Aprovada: gscandelari-ecommerce-api — Fase 1 (Core API)
+## Spec Técnica Aprovada: gscandelari-ecommerce-api
 
-### 1. Visão Geral & Escopo
 Portfólio de demonstração de "Desenvolvimento de APIs REST robustas, integrações e microsserviços com Node.js e Express", construído em Firebase (Cloud Functions 2ª geração + Express + Firestore, plano Blaze).
 
 O domínio é um **Sistema de Pedidos & Pagamentos (E-commerce Core)**, único, que evolui em 3 fases dentro de um **monorepo** chamado `gscandelari-ecommerce-api`:
-- **Fase 1 (esta spec):** API core — Produtos, Pedidos, Clientes, sem gateway de pagamento real.
-- **Fase 2 (futura, requer nova rodada de clarificação):** integração de pagamento real (gateway a definir) via webhook, cache de respostas externas em Firestore.
+- **Fase 1 (concluída, deployada):** API core — Produtos, Pedidos, Clientes, sem gateway de pagamento real.
+- **Fase 2 (esta spec):** integração de pagamento real (Stripe, sempre em modo sandbox/teste) via PaymentIntent + webhook.
 - **Fase 3 (futura, requer nova rodada de clarificação):** quebra em microsserviços (Orders, Payments, Notifications) comunicando-se via Firestore Triggers, com API Gateway via Firebase Hosting rewrites.
 
-Esta spec cobre **apenas a Fase 1**.
+---
+
+## Fase 1 (Core API)
+
+### 1. Visão Geral & Escopo
+Ver domínio geral acima. Esta seção cobre **apenas a Fase 1**.
 
 ### 2. Regras de Negócio & Casos de Teste (para o agente qa-negocio)
 - **RN01**: Um Produto possui nome, preço e estoque (quantidade inteira ≥ 0).
@@ -37,3 +41,33 @@ Esta spec cobre **apenas a Fase 1**.
 - README.md deve documentar: como rodar localmente (emuladores), variáveis de ambiente/secrets necessários, como rodar os testes, como fazer deploy.
 - Segredos via Firebase Secret Manager (`firebase functions:secrets:set`), nunca commitados.
 - Nome do projeto Firebase e do repositório GitHub: `gscandelari-ecommerce-api`.
+
+---
+
+## Fase 2 (Integração de Pagamento — Stripe)
+
+### 1. Visão Geral & Escopo
+O mesmo domínio de Pedidos ganha integração real com o Stripe, **sempre em modo sandbox/teste** (este projeto nunca processa dinheiro real — usa exclusivamente chaves de teste do Stripe). O pagamento passa a ser criado automaticamente junto com o pedido, e sua confirmação/falha passa a disparar automaticamente as transições de status que hoje só o Admin faz manualmente.
+
+Decisão técnica (não é regra de negócio, não precisou de aprovação do usuário): a integração usa a API de **PaymentIntent** do Stripe, não Checkout Session hospedado — como esta é uma API sem frontend, não há URLs de redirect (`success_url`/`cancel_url`) para expor; o `client_secret` retornado pela API é o que um futuro frontend usaria com Stripe.js/Elements para completar o pagamento.
+
+### 2. Regras de Negócio & Casos de Teste (para o agente qa-negocio)
+- **RN10**: Ao criar um Pedido (`POST /pedidos`), o sistema cria automaticamente uma PaymentIntent no Stripe no valor do `total` do pedido, com `metadata.pedidoId` apontando para o pedido criado. O `client_secret` e o `paymentIntentId` retornados pelo Stripe são persistidos no Pedido e incluídos na resposta do `POST /pedidos`.
+- **RN11**: O endpoint `POST /webhooks/stripe` (rota pública, fora do middleware `authenticate`) recebe eventos do Stripe. Todo evento tem sua assinatura (`stripe-signature` header) validada contra o webhook signing secret antes de qualquer processamento; assinatura inválida → 400, sem efeito colateral.
+- **RN12**: Evento `payment_intent.succeeded` recebido para um pedido em `pendente` transiciona o pedido para `confirmado` automaticamente — mesma transição que RN07 já permite ao Admin disparar manualmente, agora também disparável pelo webhook.
+- **RN13**: Evento `payment_intent.payment_failed` (ou equivalente de falha/expiração) recebido para um pedido em `pendente` cancela o pedido automaticamente e restaura o estoque dos itens — reaproveita a mesma lógica de cancelamento de RN06/RN07a.
+- **RN14**: Eventos de webhook já processados (mesmo `event.id` do Stripe) são ignorados em caso de reentrega/duplicata (idempotência) — não devem causar dupla transição de status nem dupla restauração de estoque.
+- **RN15**: Se o `event.data.object.metadata.pedidoId` de um evento não corresponder a nenhum pedido existente, ou se o pedido já não estiver mais em `pendente` (ex.: evento atrasado chegando depois de já ter sido processado por outro caminho), o evento é aceito com 200 (para o Stripe não reenviar) mas não realiza nenhuma alteração — logado, não é erro do cliente.
+
+**Casos de teste locais requeridos:** Jest + Supertest com o **SDK do Stripe mockado** (`jest.mock`) — sem chamada de rede real ao Stripe, sem depender de internet no CI. Meta: manter cobertura ≥70% (mesma meta da Fase 1).
+
+### 3. Decomposição de Tarefas (para o agente arquiteto-tarefas)
+- **Módulo 5: Integração Stripe** — cliente Stripe configurado (chave secreta via Secret Manager), criação de PaymentIntent na criação do pedido, persistência de `paymentIntentId`/`clientSecret`/`paymentStatus` no modelo de Pedido.
+- **Módulo 6: Webhook & idempotência** — rota pública `POST /webhooks/stripe`, validação de assinatura, tratamento dos eventos `payment_intent.succeeded`/`payment_intent.payment_failed`, registro de eventos processados (nova coleção Firestore, ex. `stripeEvents`) para idempotência (RN14).
+- **Módulo 7: Testes** — mocks do SDK do Stripe, casos cobrindo RN10–RN15, mantendo os testes da Fase 1 verdes (sem regressão).
+
+### 4. Requisitos de DevOps & Doc (para o agente devops-tech-writer)
+- Novos segredos via Firebase Secret Manager: chave secreta do Stripe (modo teste) e o webhook signing secret. Documentar no README como obter as chaves de teste do Stripe e como configurá-las localmente (emulador) e em produção.
+- README deve documentar cartões de teste do Stripe (ex. `4242 4242 4242 4242`) para quem for testar o fluxo manualmente.
+- Deploy do endpoint de webhook exige configurar a URL pública (`https://.../webhooks/stripe`) no Dashboard do Stripe (modo teste) — passo manual, documentar no README.
+- Mesma estratégia de deploy manual (`workflow_dispatch`) já usada na Fase 1 — sem mudança.
