@@ -28,6 +28,35 @@ describe("Middleware verifyInternalToken (em Orders, recebe chamadas de Payments
     process.env.ALLOWED_CALLER_SERVICE_ACCOUNT_EMAIL = CALLER_EMAIL;
   });
 
+  afterEach(() => {
+    delete process.env.SKIP_INTERNAL_AUTH;
+    delete process.env.FUNCTIONS_EMULATOR;
+  });
+
+  // Task 9.1.5
+  it("Task 9.1.5: SKIP_INTERNAL_AUTH=true + FUNCTIONS_EMULATOR=true -> segue adiante mesmo sem token", async () => {
+    process.env.SKIP_INTERNAL_AUTH = "true";
+    process.env.FUNCTIONS_EMULATOR = "true";
+    const { req, res, next } = mockReqRes();
+
+    await verifyInternalToken(req, res, next as any);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
+  });
+
+  // Task 9.1.5 - dupla trava: SKIP_INTERNAL_AUTH sozinho (sem FUNCTIONS_EMULATOR) nunca faz bypass.
+  it("Task 9.1.5: SKIP_INTERNAL_AUTH=true SEM FUNCTIONS_EMULATOR=true -> nao faz bypass, 401 sem token", async () => {
+    process.env.SKIP_INTERNAL_AUTH = "true";
+    const { req, res, next } = mockReqRes();
+
+    await verifyInternalToken(req, res, next as any);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("RN18: sem header Authorization -> 401, verifyIdToken nunca chamado", async () => {
     const { req, res, next } = mockReqRes();
     await verifyInternalToken(req, res, next as any);
