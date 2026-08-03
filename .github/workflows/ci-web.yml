@@ -1,0 +1,71 @@
+name: CI - Front-end de testes (Fase 4)
+
+# Implementa a secao 4 "Requisitos de DevOps & Doc" da Fase 4 (SPEC.md) e o
+# item "Fora de escopo desta rodada (delegado ao devops-tech-writer)" da
+# secao Fase 4 do BACKLOG.md: CI leve (lint + build + test) para `web/`,
+# mesmo padrao de `ci-services.yml` (Fase 3) - checkout, Node 20 com cache
+# de npm, `npm ci`, lint, formatacao, build, testes.
+#
+# Diferencas deliberadas em relacao a `ci-services.yml`:
+#   - SEM step de deploy: a aplicacao web/ nao e publicada nesta fase (uso
+#     local/experimentacao contra o Emulator Suite, decisao explicita do
+#     usuario - ver BACKLOG.md, secao Fase 4).
+#   - SEM Firebase/Java/Emulator Suite: os testes de `web/` sao Vitest +
+#     React Testing Library com `fetch`/Firebase Auth mockados (Epico 17.1
+#     do BACKLOG.md), propositalmente independentes de emulador rodando.
+#   - Nao e (ainda) um check obrigatorio de nenhuma branch protection,
+#     mesmo padrao de `ci-services.yml` (ver README.md > CI/CD e
+#     CONTRIBUTING.md) - o check obrigatorio de `main` continua sendo
+#     apenas `ci.yml` (functions/, Fase 1+2, em producao).
+#
+# NENHUM DEPLOY e feito por este workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/ci-web.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/ci-web.yml"
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: Lint, build e testes — web/
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Instalar dependências (npm ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatação (Prettier)
+        run: npm run format:check
+
+      - name: Build (TypeScript + Vite)
+        run: npm run build
+
+      - name: Testes (Vitest + React Testing Library)
+        # Fetch/Firebase Auth mockados (Épico 17.1 do BACKLOG.md) — nunca
+        # depende do Firebase Emulator Suite rodando. O Vitest detecta a
+        # variável de ambiente CI (definida automaticamente pelo GitHub
+        # Actions) e roda em modo "run" único, sem watch.
+        run: npm test

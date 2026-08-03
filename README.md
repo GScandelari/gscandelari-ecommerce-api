@@ -15,7 +15,9 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 
 **Fase 2 (integração de pagamento via Stripe): concluída e deployada em produção.** `POST /pedidos` cria automaticamente uma PaymentIntent no Stripe (modo teste); `POST /webhooks/stripe` confirma ou cancela pedidos automaticamente via evento assinado (RN10-RN15), com idempotência. 63/63 testes passando (49 Fase 1 + 14 Fase 2, zero regressão), CI verde no GitHub Actions. Os segredos `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` já estão configurados no Firebase Secret Manager do projeto real e o deploy foi validado de ponta a ponta via `workflow_dispatch`.
 
-**Fase 3 (microsserviços): em desenvolvimento, branch `feat/fase-3-microservicos`, ainda não mesclada em `main`.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). Estado atual: scaffold de cada serviço (`package.json`, `tsconfig`, `jest.config`) e a suíte de testes TDD dos Módulos 9-12 do `BACKLOG.md` já commitados nesta branch — propositalmente "vermelha" (`src/` de cada serviço ainda vazio), aguardando a implementação dos Módulos 8-11. `firebase.json` ainda declara só o codebase `default`; a produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento).
+**Fase 4 (front-end de testes, `web/`): implementada e mesclada em `main`.** SPA React + Vite + TypeScript, em `web/` na raiz do monorepo, para exercitar visualmente a API do monólito da Fase 1+2 (`functions/`) rodando **exclusivamente contra o Firebase Emulator Suite local** — nunca um projeto Firebase real (RN27). Não é o produto final do portfólio (esse é a API): é uma ferramenta de teste/demonstração com dois perfis, Cliente e Administrador. Lint, build e testes (Vitest + React Testing Library) verdes localmente e no `ci-web.yml`. Documentação de como rodar `web/` junto com o emulador está na seção [Front-end de testes (Fase 4) — `web/`](#front-end-de-testes-fase-4--web) abaixo.
+
+**Fase 3 (microsserviços): implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); todos sobem juntos no Emulator Suite e passam no CI (`ci-services.yml`). A produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual (`default`) — o corte de produção (Épico 8.6 do `BACKLOG.md`) fica pendente até o usuário decidir promover o projeto. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento).
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -31,6 +33,7 @@ Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de
 - [Deploy](#deploy)
 - [Integração de pagamento (Stripe) — Fase 2](#integração-de-pagamento-stripe--fase-2)
 - [Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento)
+- [Front-end de testes (Fase 4) — `web/`](#front-end-de-testes-fase-4--web)
 - [Contribuindo](#contribuindo)
 
 ## Pré-requisitos
@@ -99,6 +102,20 @@ firebase functions:secrets:set NOME_DO_SEGREDO
 ```
 
 e referenciado no código via a opção `secrets` do `onRequest`/`onCall` (2ª geração), conforme a [documentação oficial do Firebase](https://firebase.google.com/docs/functions/config-env?gen=2#secret-manager). Ver a seção ["Integração de pagamento (Stripe) — Fase 2"](#integração-de-pagamento-stripe--fase-2) abaixo para o passo a passo completo de como obter as chaves de teste e configurá-las localmente e em produção.
+
+### Front-end (`web/`) — variáveis de build (Vite)
+
+O front-end de testes (Fase 4, ver [seção dedicada](#front-end-de-testes-fase-4--web) abaixo) usa suas próprias variáveis de ambiente, documentadas em `web/.env.example` — nenhuma delas é um segredo de runtime como as do Stripe acima (a chave publicável do Stripe é, por definição, feita para ser exposta em código de browser), mas seguem a mesma convenção de nunca serem commitadas com valor real (`web/.env` também cai nas entradas genéricas `.env*`/`!.env.example` do `.gitignore` da raiz).
+
+| Variável | Descrição |
+|---|---|
+| `VITE_FIREBASE_PROJECT_ID` | Sempre `demo-gscandelari-ecommerce-api` — deve começar com `demo-` (RN27, Decisão técnica 6 do `BACKLOG.md`); `src/lib/firebase.ts` recusa inicializar e interrompe o boot se essa condição não for atendida |
+| `VITE_FIREBASE_API_KEY` / `VITE_FIREBASE_AUTH_DOMAIN` / `VITE_FIREBASE_APP_ID` | Config do Firebase Web App exigida pelo SDK do client (`initializeApp`); como o app só fala com o Auth Emulator, valores placeholder funcionam sem necessidade de um Web App real cadastrado no Console |
+| `VITE_AUTH_EMULATOR_URL` | URL do Auth Emulator (`http://localhost:9099`), usada por `connectAuthEmulator` |
+| `VITE_API_BASE_URL` | URL base da function `api` do monólito Fase 1+2 servida pelo Functions Emulator (`http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api`) |
+| `VITE_STRIPE_PUBLISHABLE_KEY` | Chave publicável de **teste** do Stripe (`pk_test_...`), mesma conta usada para `STRIPE_SECRET_KEY` (ver acima) |
+
+Copie `web/.env.example` para `web/.env` antes de rodar `npm run dev` em `web/` — detalhes na seção [Front-end de testes (Fase 4) — `web/`](#front-end-de-testes-fase-4--web).
 
 ### Credenciais de deploy (CI/CD)
 
@@ -194,6 +211,7 @@ Workflows em `.github/workflows/`:
 - **`ci.yml`** — roda em todo Pull Request para `main` e em todo push em `main`. Etapas: `npm ci` (instala dependências), `npm run lint`, `npm run build`, `npm run test:coverage:emulator` (Jest + Supertest contra o Firebase Emulator Suite, com o mesmo `firebase-tools` travado no `package-lock.json`). Nenhuma etapa de CI toca um projeto Firebase real. Este workflow é o check obrigatório configurado na proteção da branch `main` (ver `CONTRIBUTING.md`). **Cuida exclusivamente de `functions/` (Fase 1+2, em produção) e não foi alterado pela Fase 3.**
 - **`deploy.yml`** — deploy para Firebase Functions (`functions/`, codebase `default`, Fase 1+2). Ver decisão detalhada abaixo. **Não foi alterado pela Fase 3** — continua deployando somente o monólito atual.
 - **`ci-services.yml`** (novo, Fase 3) — roda lint/build/test **de forma independente** para cada um dos 3 novos serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, disparado em push/PR que tocam `services/**` na branch `feat/fase-3-microservicos` (e em PRs futuros para `main`). Não interfere em `ci.yml`/`deploy.yml` nem nos checks obrigatórios de `main` hoje. **Estado esperado atualmente: vermelho** (lint falha por não haver `eslint.config` por serviço ainda — Task 8.1.2; testes falham por não haver `src/` implementado ainda — Módulos 8-10), refletindo o TDD "vermelho" intencional descrito em [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento). **Não existe workflow de deploy para os novos serviços nesta rodada** — deploy real é a última etapa da Fase 3 (Épico 8.6), disparada manualmente e só com aprovação explícita do usuário.
+- **`ci-web.yml`** (novo, Fase 4) — mesmo padrão de `ci-services.yml`, aplicado a `web/`: `npm ci`, lint, `format:check` (Prettier), build (TypeScript + Vite) e testes (Vitest + React Testing Library, com `fetch`/Firebase Auth mockados — nunca depende do Emulator Suite rodando em CI). Disparado em push/PR para `main` que tocam `web/**`. **Sem step de deploy** — a aplicação `web/` não é publicada nesta fase (uso local/experimentação contra o Emulator Suite, decisão explícita do usuário, ver [Front-end de testes (Fase 4)](#front-end-de-testes-fase-4--web) abaixo). Não é (ainda) um check obrigatório de nenhuma branch protection, mesmo padrão de `ci-services.yml`.
 
 ## Deploy
 
@@ -410,6 +428,68 @@ A Fase 3 **nunca** decomissiona o monólito como parte do trabalho normal desta 
 5. **Somente** depois do smoke test validado, o codebase `default` é removido de `firebase.json` e a function `api` é explicitamente deletada (`firebase functions:delete api`) — decomissionamento deliberado, nunca automático.
 
 Nenhuma das etapas de produção real acima (passos 3-5) é disparada automaticamente por CI. O novo workflow de CI desta fase (`.github/workflows/ci-services.yml`, ver [CI/CD](#cicd)) faz **apenas** lint/build/test dos 3 novos serviços — não existe (propositalmente) nenhum workflow de deploy para eles nesta rodada. Um workflow de deploy só será criado quando o Épico 8.6 for de fato executado, e mesmo assim como gatilho manual (`workflow_dispatch`) sujeito a aprovação explícita do usuário antes de qualquer disparo real, nunca automático.
+
+## Front-end de testes (Fase 4) — `web/`
+
+> **Status:** implementada (Módulos 13-17 do `BACKLOG.md`, seção "Fase 4"). Lint, build e testes (Vitest + React Testing Library, 30/30 passando) verdes localmente e no `ci-web.yml`.
+
+SPA em **React + Vite + TypeScript**, ferramenta de teste/demonstração da API já construída nas Fases 1-2 (`functions/`) — não é o produto final do portfólio. Roda **exclusivamente contra o Firebase Emulator Suite local** (RN27): nunca aponta para o projeto Firebase real (`gscandelari-ecommerce-api`, alias `production`). Dois perfis de uso na mesma aplicação: **Cliente** (catálogo, criação de pedido, pagamento via Stripe Elements, histórico/cancelamento — RN21-RN24) e **Administrador**, via custom claim `admin: true` (CRUD de Produtos e gestão de Pedidos — RN25).
+
+### Como rodar `web/` junto com o Emulator Suite
+
+São **dois processos**, em dois terminais separados:
+
+1. **Terminal 1 — Emulator Suite**, a partir da **raiz do repositório** (onde está `firebase.json`):
+   ```bash
+   npx firebase-tools emulators:start
+   ```
+   Sobe Auth (`localhost:9099`), Firestore (`localhost:8080`) e Functions/`api` (`localhost:5001`) — mesmo comando já usado para desenvolver `functions/` (ver [Como rodar localmente](#como-rodar-localmente) acima). Confirme que a API responde antes de seguir:
+   ```bash
+   curl http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/health
+   ```
+2. **Terminal 2 — front-end**, a partir de `web/`:
+   ```bash
+   cd web
+   npm install
+   cp .env.example .env      # se ainda não existir; valores padrão já funcionam contra o emulador
+   npm run dev
+   ```
+   Abra a URL impressa pelo Vite (padrão `http://localhost:5173`).
+
+Se o Emulator Suite não estiver rodando, o cliente HTTP do front-end (`src/api/apiClient.ts`) detecta a falha de `fetch` e exibe a mensagem "Não foi possível conectar à API. Verifique se o Firebase Emulator Suite está rodando (`firebase emulators:start`)." em vez de travar silenciosamente — comportamento intencional (Decisão técnica 2 do `BACKLOG.md`, base de RN27).
+
+### Criar um cliente de teste e promovê-lo a admin
+
+A área de Administrador (RN25) exige a custom claim `admin: true` no Auth Emulator, exatamente como já é feito para testar `functions/` manualmente (`functions/scripts/setAdminClaim.js`, Task 2.2.3). Passo a passo:
+
+1. Com os dois processos acima rodando, cadastre um usuário normalmente pela UI (`/cadastro` em `web/`, ou pela tela de login/cadastro) — ele nasce sem a claim, ou seja, `isAdmin === false`.
+2. Em outro terminal, promova esse e-mail a admin no Auth Emulator usando o script já existente em `functions/`:
+   ```bash
+   cd functions
+   FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 npm run set-admin -- email@exemplo.com
+   ```
+   O script (`functions/scripts/setAdminClaim.js`) recusa-se a rodar sem `FIREBASE_AUTH_EMULATOR_HOST` definido, exatamente para nunca ser usado por engano contra um projeto real.
+3. **A claim setada no passo 2 não aparece automaticamente na sessão já aberta no navegador** — o token em cache do SDK do Firebase Auth só se renova sozinho a cada ~1h. Para refletir a claim na UI, faça uma das duas opções:
+   - Deslogue e logue novamente em `web/` (o `AuthContext` força `getIdTokenResult(forceRefresh: true)` logo após login, ver Decisão técnica 3 do `BACKLOG.md`); ou
+   - Se a aplicação expuser um gatilho de `refreshClaims()` (ex. botão "Atualizar permissões" ou chamado automaticamente em algum ponto da UI), acione-o sem precisar deslogar.
+4. Com `isAdmin === true`, os links/rotas de admin (`/admin/produtos`, `/admin/pedidos`) ficam visíveis e acessíveis.
+
+Lembre-se: a claim de admin controla apenas a *exibição* das rotas no front-end (RN26, só UX) — o backend (`requireAdmin`) continua sendo a única fonte real de autorização, com ou sem o front-end.
+
+### (Opcional) Stripe CLI — fechar o ciclo RN23 + RN12 (confirmação automática de pagamento)
+
+Ao completar um pagamento de teste no `PaymentForm` (Stripe Elements, cartão `4242 4242 4242 4242`), o `confirmCardPayment` do Stripe.js confirma o pagamento **no Stripe** — isso já exercita RN23 de ponta a ponta isoladamente, sem nenhum passo extra. Porém, a **transição do status do pedido** para `confirmado` é uma regra separada (RN12, Fase 2) e só acontece quando o backend recebe o webhook `POST /webhooks/stripe`. Como o Emulator Suite roda em `localhost`, o Stripe (serviço externo) não consegue entregar esse webhook diretamente — é necessário o [Stripe CLI](https://docs.stripe.com/stripe-cli) fazendo o encaminhamento:
+
+```bash
+stripe listen --forward-to http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/webhooks/stripe
+```
+
+Rode esse comando em um terceiro terminal, autenticado (`stripe login`) na mesma conta Stripe cuja chave de teste está em `functions/.env` (`STRIPE_SECRET_KEY`) — o `stripe listen` imprime um signing secret temporário (`whsec_...`); copie-o para `STRIPE_WEBHOOK_SECRET` em `functions/.env` (reinicie o Emulator Suite após editar) para a assinatura do webhook ser validada corretamente.
+
+- **Sem o Stripe CLI rodando:** o pagamento é confirmado no Stripe, mas o pedido permanece `pendente` até um Admin alterar o status manualmente pela área de admin (RN25) — comportamento esperado da ferramenta de teste, não um bug. A tela de confirmação de pagamento do front-end deixa esse comportamento explícito.
+- **Com o Stripe CLI rodando:** o webhook é entregue, `POST /webhooks/stripe` confirma o pedido automaticamente e o status muda para `confirmado` sem nenhuma ação manual — fechando o ciclo RN23 (front-end) + RN12 (backend, Fase 2) de ponta a ponta.
+
+Este passo é **opcional** para exercitar RN23 isoladamente; é **necessário** apenas para observar o fechamento automático do ciclo RN23+RN12.
 
 ## Contribuindo
 

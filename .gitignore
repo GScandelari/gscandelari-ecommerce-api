@@ -37,6 +37,10 @@ emulator-data/
 .env
 .env.*
 !.env.example
+# web/.env.test: apenas placeholders sem significado real (Auth Emulator nao
+# valida, testes mockam rede) - necessario para `npm test`/CI rodar sem
+# depender de um .env local (ver web/.env.test para o porque de cada valor).
+!.env.test
 *serviceAccount*.json
 *service-account*.json
 *firebase-adminsdk*.json
