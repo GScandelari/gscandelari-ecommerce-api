@@ -4,8 +4,8 @@ Portfólio de demonstração de "Desenvolvimento de APIs REST robustas, integra�
 
 O domínio é um **Sistema de Pedidos & Pagamentos (E-commerce Core)**, único, que evolui em 3 fases dentro de um **monorepo** chamado `gscandelari-ecommerce-api`:
 - **Fase 1 (concluída, deployada):** API core — Produtos, Pedidos, Clientes, sem gateway de pagamento real.
-- **Fase 2 (esta spec):** integração de pagamento real (Stripe, sempre em modo sandbox/teste) via PaymentIntent + webhook.
-- **Fase 3 (futura, requer nova rodada de clarificação):** quebra em microsserviços (Orders, Payments, Notifications) comunicando-se via Firestore Triggers, com API Gateway via Firebase Hosting rewrites.
+- **Fase 2 (concluída, deployada):** integração de pagamento real (Stripe, sempre em modo sandbox/teste) via PaymentIntent + webhook.
+- **Fase 3 (esta spec):** quebra em microsserviços (Orders, Payments, Notifications), cada um um codebase de Cloud Functions deployável independentemente, com API Gateway via Firebase Hosting rewrites.
 
 ---
 
@@ -71,3 +71,42 @@ Decisão técnica (não é regra de negócio, não precisou de aprovação do us
 - README deve documentar cartões de teste do Stripe (ex. `4242 4242 4242 4242`) para quem for testar o fluxo manualmente.
 - Deploy do endpoint de webhook exige configurar a URL pública (`https://.../webhooks/stripe`) no Dashboard do Stripe (modo teste) — passo manual, documentar no README.
 - Mesma estratégia de deploy manual (`workflow_dispatch`) já usada na Fase 1 — sem mudança.
+
+---
+
+## Fase 3 (Microsserviços)
+
+### 1. Visão Geral & Escopo
+O sistema, hoje um único codebase de Cloud Functions (Fase 1+2), é reestruturado em **3 serviços independentes**, cada um seu próprio codebase de Cloud Functions (deploy independente):
+- **Orders**: Produtos + Pedidos (Fase 1) — dono exclusivo da coleção `pedidos` no Firestore.
+- **Payments**: integração Stripe + webhook (Fase 2), extraído para um serviço próprio.
+- **Notifications** (novo): envia e-mail (Resend, sempre modo teste/sandbox) quando um pedido é confirmado ou cancelado.
+
+Um **API Gateway** (Firebase Hosting com rewrites) expõe um único domínio público na frente dos 3 serviços.
+
+Decisões técnicas (não são regras de negócio, não precisaram de aprovação do usuário além do padrão de comunicação abaixo, que foi decidido explicitamente pelo usuário):
+- Comunicação **Orders → Payments** e **Payments → Orders** é **HTTP síncrona interna**, autenticada via ID token assinado pelo Google (OIDC nativo do GCP para chamadas serviço-a-serviço), não Firebase Auth (que é só para clientes finais) nem secret compartilhado.
+- Comunicação para **Notifications** é **assíncrona** via Firestore Trigger (`onDocumentUpdated` em `pedidos`) — assimetria deliberada: Orders↔Payments precisa de resposta imediata (RN10), Notifications é fire-and-forget.
+- Nenhum serviço além de Orders escreve na coleção `pedidos`.
+
+### 2. Regras de Negócio & Casos de Teste (para o agente qa-negocio)
+- **RN16**: Ao criar um pedido, Orders chama o serviço Payments via HTTP síncrono interno para criar a PaymentIntent (equivalente ao que hoje é uma chamada de função local) — o contrato de `POST /pedidos` para o cliente final não muda (RN10 continua valendo: `paymentIntentId`/`clientSecret` retornados na mesma resposta).
+- **RN17**: Quando o webhook do Stripe (hospedado no serviço Payments) recebe `payment_intent.succeeded`/`payment_intent.payment_failed`/`payment_intent.canceled`, Payments chama um endpoint HTTP interno do Orders para efetivar a transição de status (equivalente às RN12/RN13 já existentes) — Payments nunca escreve diretamente no Firestore na coleção `pedidos`.
+- **RN18**: Toda chamada HTTP interna entre serviços (Orders↔Payments) exige um ID token válido assinado pelo Google, verificado pelo serviço receptor; requisição sem token ou com token inválido é rejeitada (401), independente de qualquer Firebase Auth de cliente final.
+- **RN19**: O serviço Notifications reage a mudanças na coleção `pedidos` (Firestore Trigger) e envia um e-mail para o cliente dono do pedido quando `status` transiciona para `confirmado` ou `cancelado`. Falha no envio de e-mail é registrada mas **nunca** reverte ou bloqueia a transição de status já efetivada por Orders (best-effort, fora do fluxo crítico).
+- **RN20**: O API Gateway (Firebase Hosting rewrites) roteia `/produtos` e `/pedidos` (rotas públicas) para Orders, e `/webhooks/stripe` para Payments, através de um único domínio público. Notifications não expõe nenhuma rota pública.
+
+**Casos de teste locais requeridos:** Jest + Supertest por serviço (cada codebase com sua própria suíte), mockando a comunicação HTTP entre serviços e o SDK do Resend (mesmo padrão de mock já usado para o Stripe na Fase 2). Meta: manter cobertura ≥70% em cada serviço.
+
+### 3. Decomposição de Tarefas (para o agente arquiteto-tarefas)
+- **Módulo 8: Reestruturação multi-codebase** — `firebase.json` com múltiplos `codebases`, reorganização de `functions/` em `services/orders/`, `services/payments/`, `services/notifications/`, migração do código já existente (Fase 1 → Orders, Fase 2 → Payments) sem regressão nos 63 testes já existentes.
+- **Módulo 9: Extração do serviço Payments + comunicação síncrona** — endpoint interno em Payments para Orders chamar (criação de PaymentIntent), endpoint interno em Orders para Payments chamar (transição de status via webhook), autenticação via ID token Google nos dois sentidos (RN16-RN18).
+- **Módulo 10: Serviço Notifications (novo)** — cliente Resend (mesmo padrão de singleton do Stripe/Firebase Admin), Firestore Trigger reagindo a mudanças de `status` em `pedidos`, envio de e-mail best-effort (RN19).
+- **Módulo 11: API Gateway (Firebase Hosting)** — configuração de rewrites roteando para os 3 serviços (RN20).
+- **Módulo 12: Testes e regressão** — suíte por serviço, mocks de comunicação inter-serviço e do Resend, confirmação de zero regressão nas RN01-RN15 já existentes.
+
+### 4. Requisitos de DevOps & Doc (para o agente devops-tech-writer)
+- Novo segredo via Firebase Secret Manager: chave de API do Resend (modo teste/sandbox).
+- CI/CD: workflows precisam lidar com múltiplos codebases (lint/build/test por serviço; deploy por codebase, ex. `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`).
+- README deve documentar a nova arquitetura (diagrama textual dos 3 serviços + gateway), como rodar todos os serviços localmente no Emulator Suite, e como testar o fluxo de notificação por e-mail manualmente.
+- Mesma estratégia de deploy manual (`workflow_dispatch`) já usada nas Fases 1/2 — sem mudança.
