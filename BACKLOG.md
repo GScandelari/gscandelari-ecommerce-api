@@ -330,3 +330,226 @@ Também foi corrigido durante a implementação (não estava no desenho original
 Segredos `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` (modo teste) configurados no Firebase Secret Manager real via `firebase functions:secrets:set --data-file`. Webhook cadastrado no Dashboard do Stripe (modo teste) apontando para `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api/webhooks/stripe`, eventos `payment_intent.succeeded`/`payment_intent.payment_failed`/`payment_intent.canceled`.
 
 Deploy via `workflow_dispatch` validado de ponta a ponta (run verde após 3 rodadas de ajuste de papéis IAM na Service Account — ver Task 4.4.3): confirmado com `curl` real que `/health` responde 200 e `/webhooks/stripe` rejeita corretamente requisição sem assinatura (400).
+
+---
+
+## Backlog: gscandelari-ecommerce-api — Fase 3 (Microsserviços)
+
+> Gerado a partir de SPEC.md, seção "Fase 3". Fragmenta os Módulos 8-12 (seção 3 da Fase 3) em épicos e tasks técnicas pequenas, testáveis de forma independente. Nenhuma regra de negócio (RN16-RN20) foi reaberta ou reinterpretada além do necessário para viabilizar a implementação. **Esta é a fase de maior risco até agora**: as Fases 1+2 estão deployadas em produção real (projeto `gscandelari-ecommerce-api`, 63/63 testes verdes), servindo tráfego real (inclusive o webhook do Stripe, configurado no Dashboard real do Stripe modo teste). Toda a decomposição abaixo foi desenhada para que o corte de produção seja a **última** ação, não a primeira, e para que o monólito atual (`functions/`, codebase `default`, function `api`) continue servindo tráfego ininterruptamente até o novo caminho estar validado ponta a ponta.
+
+### Decisões técnicas registradas nesta rodada (não são bloqueios, não requerem o clarificador)
+
+1. **Estratégia de migração sem downtime.** Toda a reestruturação é feita em uma branch isolada (`feat/fase-3-microservicos`), nunca diretamente em `main`, e validada 100% localmente (Emulator Suite multi-codebase + Hosting Emulator, suíte de testes por serviço) antes de qualquer deploy real. O corte de produção não é "big bang silencioso": é uma sequência controlada onde o monólito atual permanece intocado e servindo tráfego durante toda a transição, porque o comando de deploy dos novos codebases (`firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`) usa `--only` e portanto **nunca toca** no codebase `default` (function `api`) — Firebase só adiciona/atualiza os targets explicitamente listados. Sequência exata recomendada:
+   1. Branch dedicada; `firebase.json` passa a declarar os 3 novos codebases **além** de manter o codebase `default` existente (não remover ainda) — isso evita que um deploy incompleto ou um `firebase deploy` sem `--only` explícito derrube a function `api` por omissão.
+   2. Restruturação completa do código dentro da branch (Módulos 8-11 abaixo), validada localmente com `firebase emulators:start` subindo os 3 novos codebases + Firestore + Auth + Hosting simultaneamente, exercitando manualmente o fluxo crítico ponta a ponta (criar pedido → PaymentIntent via chamada interna → webhook simulado → transição de status via chamada interna → e-mail via trigger) inteiramente no emulador, sem qualquer chamada a projeto/rede real além dos SDKs mockados nos testes automatizados.
+   3. Suíte de testes das 3 novas services rodando verde (Módulo 12), sem nenhuma regressão nas RN01-RN15 já cobertas nas Fases 1/2 (redistribuídas entre Orders e Payments).
+   4. PR revisado e mergeado em `main` **só neste ponto** — o merge em si não deploya nada (estratégia de deploy manual via `workflow_dispatch`, herdada das Fases 1/2, Task 4.5.1).
+   5. Deploy real dos 3 novos codebases + hosting, com `--only` explícito, function `api` do codebase `default` permanece rodando e servindo o domínio antigo sem interrupção durante e depois deste deploy (Task 8.6.1).
+   6. Smoke test em produção real do fluxo crítico ponta a ponta pelo **novo** caminho, incluindo a migração manual da URL do webhook no Dashboard do Stripe (modo teste) para a nova URL pública de Payments — este é o único ponto de "corte" que depende de um passo manual externo ao Firebase, e é feito solitariamente e verificado antes de prosseguir (Task 8.6.2).
+   7. Só depois do smoke test real validado, o codebase `default`/function `api` é removido de `firebase.json` e explicitamente deletado (`firebase functions:delete api`) — decomissionamento deliberado do monólito, nunca automático (Task 8.6.3).
+   Risco residual identificado e considerado aceitável: como este projeto é um portfólio de demonstração sem frontend real, o único cliente externo de fato dependente da URL antiga é a configuração do webhook no Dashboard do Stripe — todo o resto do "tráfego real" é testável/observável via `curl`/Postman, o que reduz drasticamente a superfície de risco de um cutover clássico de API pública com muitos consumidores.
+
+2. **Autenticação serviço-a-serviço via ID token do Google — mecanismo exato em Cloud Functions 2ª geração (Cloud Run por baixo).** Cada Cloud Function 2ª geração roda como um serviço Cloud Run com uma *service account* de runtime associada. Decisão de implementação:
+   - **Emissão do token (lado chamador):** usar a biblioteca `google-auth-library` (`GoogleAuth().getIdTokenClient(audience)` → `fetchIdToken(audience)`), com `audience` = URL HTTPS do serviço de destino. Rodando dentro do GCP (Cloud Functions/Cloud Run), essa biblioteca resolve automaticamente via metadata server (`http://metadata.google.internal/.../identity?audience=...`), usando a identidade da service account de runtime da própria function — **sem gerenciar nenhuma chave**.
+   - **Service accounts dedicadas:** em vez de usar a service account default do App Engine (compartilhada, permissões amplas), são provisionadas 2 SAs dedicadas (`orders-runtime@...`, `payments-runtime@...`), cada Cloud Function configurada para rodar com a sua via a opção `serviceAccount` do `onRequest` (Functions 2ª geração suporta essa opção, repassada ao Cloud Run subjacente).
+   - **Validação (lado receptor) — RN18:** o serviço receptor usa `OAuth2Client.verifyIdToken` (mesma `google-auth-library`) para validar assinatura/emissor do token contra os certs públicos do Google, confere `aud` = URL do próprio serviço, e confere `email` do payload contra uma allow-list configurável via env var (o e-mail da SA do chamador esperado). Token ausente, assinatura inválida, `aud` errado ou `email` fora da allow-list → 401.
+   - **Sobre a permissão IAM "Cloud Run Invoker":** decisão explícita de **não** usá-la como mecanismo de isolamento entre serviços nesta arquitetura, porque tanto Orders quanto Payments hospedam, no mesmo Cloud Run service, tanto rotas internas quanto rotas públicas (Orders serve `/produtos`/`/pedidos` ao público; Payments serve `/webhooks/stripe` ao público/Stripe) — o invoker é necessariamente `allUsers` nos dois, e essa permissão não consegue restringir por rota dentro do mesmo app Express. A fronteira de segurança real e single source of truth é a validação de token em nível de aplicação (RN18), não o IAM. Isso é registrado explicitamente para não ser confundido com uma lacuna de segurança — é uma escolha de design compatível com a estrutura de codebases definida pela spec (um único Express app por serviço, misturando rotas públicas e internas).
+   - **Desenvolvimento local:** o metadata server não existe no Emulator Suite; por isso, uma flag de conveniência `SKIP_INTERNAL_AUTH` (default `false`, documentada como uso exclusivo de emulator, nunca deployada como `true`) permite testar localmente sem token real — o comportamento padrão (flag desligada) ainda exige o middleware real, para exercitá-lo nos testes automatizados com o SDK mockado.
+
+3. **Fronteira exata da extração do código Stripe.** O código do Stripe é movido integralmente para Payments, mas a escrita no documento `Pedido` continua exclusiva de Orders — nunca há duplicação da fonte de verdade do pedido:
+   - **Vai para Payments (código próprio, não compartilhado):** `stripeClient.ts`, `stripeService.ts` (adaptado — ver abaixo), `webhooks.routes.ts`, `stripeEventsRepository.ts`/coleção `stripeEvents` (idempotência de RN14 passa a ser 100% um concern interno de Payments, checado **antes** de qualquer chamada HTTP a Orders — reduz inclusive o número de chamadas internas em reentregas de webhook).
+   - **Fica em Orders, inalterado internamente:** `confirmarPagamentoPedido`, `cancelarPedidoPorFalhaPagamento`, `restaurarEstoque`, `pedidosRepository.ts`, `pedidos.statusMachine.ts`, o modelo `Pedido` completo (com `paymentIntentId`/`paymentClientSecret`/`paymentStatus`) — Orders continua a única escrita em `pedidos`, exatamente como a spec exige ("Payments nunca escreve diretamente no Firestore na coleção pedidos"). Essas funções, que hoje são chamadas por import direto do handler do webhook (mesmo processo), passam a ser expostas como 2 endpoints HTTP internos (`POST /internal/pedidos/:id/confirmar-pagamento`, `POST /internal/pedidos/:id/cancelar-por-falha-pagamento`) chamados por Payments.
+   - **Contrato simplificado na fronteira:** hoje `stripeService.criarPaymentIntent(pedido: Pedido)` recebe o objeto `Pedido` inteiro. Como Payments não deveria precisar conhecer o tipo `Pedido` completo (ele não lê nem escreve a coleção `pedidos`), o contrato do novo endpoint interno `POST /internal/payment-intents` é deliberadamente reduzido a `{ pedidoId: string, total: number }` → `{ paymentIntentId, clientSecret }`. Isso elimina qualquer necessidade de duplicar o tipo `Pedido` em Payments — uma simplificação real habilitada pela extração, não só uma tradução 1:1 do código antigo.
+   - **`PaymentGatewayError`:** existe em **ambos** os codebases, com o mesmo papel em cada um mas por motivos diferentes — em Payments, é lançada quando a chamada real ao Stripe falha; em Orders, é lançada quando a chamada HTTP interna a Payments falha (rede, 401, 5xx) — mantendo o mesmo contrato observável (502) que o cliente final já via na Fase 2.
+
+4. **Duplicação vs. compartilhamento de código entre os 3 codebases.** Decisão: duplicar deliberadamente os utilitários pequenos (`firebaseAdmin.ts`, `errors/index.ts`, `asyncHandler.ts`, `middlewares/errorHandler.ts`, e o novo par `mintInternalToken`/`verifyInternalToken`) em cada codebase que precisa deles, em vez de criar um pacote npm compartilhado (workspace). Motivo: cada arquivo tem poucas dezenas de linhas, muda raramente, e um pacote compartilhado exigiria uma ferramenta de build de monorepo (Turborepo/Nx) ou linking `file:`, adicionando complexidade de CI e — pior — reintroduzindo exatamente o tipo de acoplamento que a Fase 3 existe para eliminar (uma mudança não relacionada em Notifications forçando rebuild/versionamento sentido por Orders). Nuances por arquivo:
+   - `firebaseAdmin.ts`: duplicado nos 3 (Notifications também precisa, para `admin.auth().getUser` e o próprio SDK do trigger).
+   - `errors/index.ts`: duplicado em Orders e Payments (ambos têm rotas Express com o mesmo middleware de erro padronizado); Notifications não precisa (sem rotas HTTP, tratamento de erro é local/best-effort, RN19).
+   - `authenticate`/`requireAdmin` (Firebase Auth de cliente final): só existem em Orders — Payments não tem rotas autenticadas por cliente final (webhook é público, validado por assinatura Stripe; rota interna é validada por ID token Google); Notifications não tem rotas HTTP.
+   - `mintInternalToken`/`verifyInternalToken`: duplicado em Orders e Payments (os únicos 2 serviços que se chamam mutuamente); Notifications não precisa (comunicação assíncrona via trigger, sem chamada HTTP síncrona).
+   Esta decisão é revisitada apenas se a superfície duplicada crescer muito além disso (ex.: > 8-10 arquivos) ou divergir de forma perigosa entre os serviços — não é o caso nesta fase.
+
+5. **Resolução do e-mail do cliente em Notifications, sem duplicar dado no modelo `Pedido`.** O documento `Pedido` não tem (e não precisa ganhar) um campo de e-mail — Notifications resolve o e-mail do cliente dono via `admin.auth().getUser(pedido.clienteId).email` (Admin SDK, funciona a partir de qualquer codebase, independente de quem escreveu o dado), evitando desnormalizar/duplicar o e-mail no pedido só para uso de um serviço. Adicionalmente, o trigger `onDocumentUpdated` só dispara o envio quando `before.status !== after.status` **e** `after.status` é `confirmado`/`cancelado` — decisão técnica para não reenviar e-mail em updates não relacionados ao status (ex.: a gravação de `paymentIntentId`/`paymentClientSecret` que ocorre logo após a criação do pedido, com `status` ainda `pendente`).
+
+6. **Semântica quando a chamada interna Payments → Orders falha (ex. Orders temporariamente indisponível).** Não é criado nenhum mecanismo de retry customizado: se a chamada de Payments para o endpoint interno de Orders falhar (rede, 5xx, 401 por token expirado), a exceção propaga e o handler do webhook responde ao Stripe com 5xx **sem** chamar `registrarEventoProcessado` — isso reaproveita o mecanismo de reentrega que o próprio Stripe já provê (o design de idempotência de RN14, herdado da Fase 2, já assume reentregas como caso normal). Nenhum código novo é necessário além de deixar a chamada interna propagar sua falha como uma exceção não capturada antes do registro de idempotência, mesma ordem já implementada na Task 6.3.2 da Fase 2 (processa o efeito de domínio, só depois registra o evento como processado).
+
+### Ordem sugerida de execução (visão macro)
+
+1. **Módulo 8 / Épicos 8.1 → 8.5** (branch, estrutura multi-codebase, migração de código de Orders e Payments, scaffolding de Notifications, validação local) — pré-requisito de tudo; 8.2 e 8.3 podem rodar em paralelo entre si; 8.4 é independente.
+2. **Módulo 9** (comunicação síncrona Orders↔Payments) — depende de 8.2 e 8.3 completos; ordem interna 9.1 (autenticação) → 9.2 e 9.3 (podem rodar em paralelo entre si, ambas dependem de 9.1).
+3. **Módulo 10** (Notifications) — pode rodar em paralelo ao Módulo 9; depende só de 8.4 e da coleção `pedidos` já existente/gerenciada por Orders.
+4. **Módulo 11** (API Gateway) — depende de 8.5 (nomes de export definidos) e dos Módulos 9 e 10 completos (os 3 serviços já respondem corretamente antes de serem expostos atrás do gateway).
+5. **Módulo 12** (Testes) — incremental em paralelo a cada épico dos Módulos 9-11 (TDD por serviço), fechamento de cobertura/rastreabilidade final só depois de tudo completo.
+6. **Módulo 8 / Épico 8.6** (corte de produção e decomissionamento do `default`) — **sempre por último**, só depois de Módulos 9-12 validados localmente/no emulador; é a única parte desta fase que toca o ambiente de produção real.
+
+---
+
+### Módulo 8: Reestruturação multi-codebase
+
+- **Épico 8.1: Preparação, branch e estrutura multi-codebase**
+  - [ ] Task 8.1.1: Criar branch `feat/fase-3-microservicos` a partir de `main`; nenhuma alteração é enviada a `main` até a validação completa local (emulador multi-codebase, Módulo 12) estar verde — reflete a Decisão técnica 1 (critério de aceite: branch criada; PR só é aberto ao final do Módulo 12, nunca antes)
+  - [ ] Task 8.1.2: Criar `services/orders/`, `services/payments/`, `services/notifications/`, cada uma com `package.json`, `tsconfig.json`, `tsconfig.build.json` e configuração de lint/format próprios, espelhando os scripts já usados em `functions/` (build/lint/test/test:coverage/test:emulator) (critério de aceite: `npm install` roda com sucesso, de forma independente, dentro de cada uma das 3 pastas)
+  - [ ] Task 8.1.3: Atualizar `firebase.json` para array `codebases` com `orders` (source `services/orders`), `payments` (source `services/payments`), `notifications` (source `services/notifications`) — **mantendo** o codebase `default` (source `functions`) declarado, sem remover, conforme Decisão técnica 1 (critério de aceite: `firebase.json` válido; `firebase emulators:start` sobe os 4 codebases — 3 novos + `default` — sem erro de configuração)
+  Dependências: nenhuma (ponto de partida da Fase 3).
+
+- **Épico 8.2: Migração do código Orders (Fase 1 + fronteira de pedidos)**
+  - [ ] Task 8.2.1: Copiar para `services/orders/src/` o código de Produtos e a base de Pedidos: `models/`, `repositories/produtosRepository.ts` e `pedidosRepository.ts`, `schemas/`, `routes/produtos.routes.ts` e `pedidos.routes.ts`, `middlewares/authenticate.ts`/`requireAdmin.ts`/`validate.ts`/`errorHandler.ts`, `firebaseAdmin.ts`, `errors/index.ts`, `utils/asyncHandler.ts`, `services/pedidos.statusMachine.ts`, `services/pedidosService.ts` (critério de aceite: `npm run build` dentro de `services/orders` compila sem erro e sem nenhuma referência a `stripeClient`/`stripeService`)
+  - [ ] Task 8.2.2: Em `pedidosService.ts` (cópia em Orders), remover o import direto de `criarPaymentIntent` e trocar a chamada dentro de `criarPedidoComPagamento` por uma chamada ao cliente HTTP interno de Payments (implementado na Task 9.2.2) — mantém exatamente a mesma sequência já documentada na Fase 2 (transação Firestore → chamada externa → update não-transacional → compensação em falha), só troca "chamada de função local" por "chamada HTTP autenticada" — implementa a fronteira da Decisão técnica 3 (critério de aceite: `criarPedidoComPagamento` não importa mais nada de um módulo Stripe; compila e é testável com a chamada HTTP interna mockada)
+  - [ ] Task 8.2.3: Manter `confirmarPagamentoPedido`/`cancelarPedidoPorFalhaPagamento`/`restaurarEstoque` inalterados internamente; expô-los via 2 novos handlers de rota interna (implementados na Task 9.3.1) em vez de serem chamados por import direto do webhook, que agora vive em outro codebase (critério de aceite: comportamento idêntico ao da Fase 2 nos testes unitários de `pedidosService` já existentes, sem alteração de asserts, apenas de forma de invocação)
+  - [ ] Task 8.2.4: Recriar `app.ts`/`index.ts` de Orders montando `/health`, `/docs`, `/produtos`, `/pedidos` e os novos `/internal/pedidos/...` (sem `/webhooks`) (critério de aceite: `GET /webhooks/stripe` em Orders retorna 404; `/produtos`, `/pedidos`, `/docs` idênticos ao comportamento pré-migração)
+  Dependências: Épico 8.1.
+
+- **Épico 8.3: Migração do código Payments (Fase 2 — Stripe)**
+  - [ ] Task 8.3.1: Copiar para `services/payments/src/` `stripeClient.ts`, `stripeService.ts`, `routes/webhooks.routes.ts`, `repositories/stripeEventsRepository.ts`, mais cópias próprias de `firebaseAdmin.ts`, `errors/index.ts` (incluindo `PaymentGatewayError`), `utils/asyncHandler.ts`, `middlewares/errorHandler.ts` — reflete a Decisão técnica 4 (critério de aceite: `npm run build` dentro de `services/payments` compila sem depender de nenhum arquivo fora da própria pasta)
+  - [ ] Task 8.3.2: Adaptar `stripeService.criarPaymentIntent` para a assinatura `criarPaymentIntent(pedidoId: string, total: number)`, eliminando a dependência do tipo `Pedido` em Payments — implementa a simplificação de contrato da Decisão técnica 3 (critério de aceite: nenhuma referência a um tipo `Pedido`/`@/models/pedido` resta em `services/payments`)
+  - [ ] Task 8.3.3: Recriar `app.ts`/`index.ts` de Payments montando `/health` e `/webhooks/stripe` (mais `/internal/payment-intents`, implementado na Task 9.2.1) — sem `/produtos`/`/pedidos`/`/docs` (critério de aceite: `GET /produtos` em Payments retorna 404)
+  Dependências: Épico 8.1; em paralelo ao Épico 8.2.
+
+- **Épico 8.4: Scaffolding do serviço Notifications (novo)**
+  - [ ] Task 8.4.1: Inicializar `services/notifications/` com `package.json`/`tsconfig` próprios e dependências mínimas (`firebase-admin`, `firebase-functions`, `resend`), sem Express — Notifications não expõe nenhuma rota HTTP pública (RN20) (critério de aceite: `npm run build` compila um `index.ts` placeholder válido, sem dependência de Express)
+  Dependências: Épico 8.1.
+
+- **Épico 8.5: Regressão de infraestrutura de deploy**
+  - [ ] Task 8.5.1: Validar localmente com `firebase emulators:start` que os 4 codebases (3 novos + `default`, ainda preservado) sobem simultaneamente sem conflito de porta/nome de função (critério de aceite: Emulator UI lista as functions ativas dos 4 codebases sem erro)
+  - [ ] Task 8.5.2: Confirmar e documentar a convenção de nomes de export por codebase (Firebase prefixa automaticamente pelo nome do codebase, ex. `export const api` dentro de `services/orders` resulta em `orders-api` no deploy) — nomes finais usados nos rewrites do Módulo 11 (critério de aceite: inspeção do plano de deploy/documentação confirma os nomes exatos esperados: `orders-api`, `payments-api`, `notifications-onPedidoStatusChange`, sem colisão com `api` do codebase `default`)
+  Dependências: Épicos 8.2, 8.3, 8.4.
+
+- **Épico 8.6: Corte de produção e decomissionamento do `default`** *(sempre por último — ver Decisão técnica 1)*
+  - [ ] Task 8.6.1: Deploy real dos 3 novos codebases + hosting via `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`, sem tocar no codebase `default` (critério de aceite: deploy conclui com sucesso; `curl` no domínio antigo `.../api/health` continua 200 durante e depois deste deploy; `curl` no novo domínio do Hosting em `/produtos` também responde 200, autenticação exigida)
+  - [ ] Task 8.6.2: Smoke test em produção real do fluxo crítico ponta a ponta pelo **novo** caminho: criar pedido via novo domínio (Orders) → confirmar chamada interna real a Payments (PaymentIntent criada em modo teste do Stripe) → atualizar a URL do webhook no Dashboard do Stripe (modo teste) para a nova URL pública de Payments → disparar evento de teste real ou via `stripe trigger` → confirmar que Orders efetiva a transição de status via chamada interna de Payments → confirmar e-mail (Resend, modo teste/sandbox) disparado por Notifications (critério de aceite: os 5 passos validados manualmente com evidência — status HTTP e logs reais — antes de prosseguir para a Task 8.6.3)
+  - [ ] Task 8.6.3: Somente após a Task 8.6.2 validada, remover o codebase `default` de `firebase.json` e excluir a function `api` (`firebase functions:delete api`) — decomissionamento deliberado do monólito, nunca automático (critério de aceite: `firebase functions:list` não lista mais `api`; domínio antigo `.../api/health` passa a responder 404, confirmando a remoção)
+  Dependências: Épicos 8.1-8.5 completos; Módulos 9, 10 e 11 completos e validados localmente; execução real em produção coordenada com o agente devops-tech-writer (credenciais de deploy, Task 4.4.3 já existente).
+
+---
+
+### Módulo 9: Extração do serviço Payments + comunicação síncrona
+
+> Implementa RN16-RN18. Tabela de rastreabilidade ao final desta seção.
+
+- **Épico 9.1: Autenticação serviço-a-serviço via ID token Google — implementa RN18**
+  - [ ] Task 9.1.1: Criar utilitário `internalAuth.ts` (duplicado em Orders e Payments — Decisão técnica 4) com `mintInternalToken(audience: string): Promise<string>` usando `google-auth-library` (`GoogleAuth().getIdTokenClient(audience)`/`fetchIdToken`) — base de **RN16**/**RN17** (critério de aceite: função testável com `google-auth-library` mockada, retorna string de token; a chamada real e não-mockada só é exercitada manualmente em emulador/produção com credenciais, nunca no CI)
+  - [ ] Task 9.1.2: Criar middleware `verifyInternalToken` (duplicado em Orders e Payments) que extrai `Authorization: Bearer <token>`, valida via `OAuth2Client.verifyIdToken`, confere `aud` = URL do próprio serviço e `email` do payload contra allow-list configurável (env var `ALLOWED_CALLER_SERVICE_ACCOUNT_EMAIL`) — implementa **RN18** (critério de aceite: token ausente → 401; assinatura inválida ou `aud` incorreto → 401; `email` fora da allow-list → 401; token válido e esperado → segue adiante)
+  - [ ] Task 9.1.3: Provisionar `orders-runtime@PROJECT.iam.gserviceaccount.com` e `payments-runtime@PROJECT.iam.gserviceaccount.com` via `gcloud iam service-accounts create`, e configurar cada Cloud Function 2ª geração para rodar com sua SA dedicada via a opção `serviceAccount` do export HTTPS (critério de aceite: `gcloud run services describe` confirma a service account dedicada configurada para cada function, distinta da SA default do App Engine)
+  - [ ] Task 9.1.4: Conceder às 2 novas SAs apenas as permissões mínimas necessárias (`roles/datastore.user` para ambas; `roles/secretmanager.secretAccessor` só para `payments-runtime`, que lê `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`) — sem conceder `roles/run.invoker` cruzado como mecanismo de segurança, conforme justificado na Decisão técnica 2 (critério de aceite: `gcloud projects get-iam-policy` confirma exatamente os papéis listados, nenhum papel administrativo herdado)
+  - [ ] Task 9.1.5: Documentar `SKIP_INTERNAL_AUTH` em `.env.example` de Orders e Payments (default `false`, uso exclusivo de emulator local, nunca deployado como `true`) — conveniência de dev descrita na Decisão técnica 2 (critério de aceite: com a flag ligada no emulator, chamada interna sem token passa; com a flag desligada — padrão — o middleware real é exercitado mesmo no emulator)
+  Dependências: Épico 8.1.
+
+- **Épico 9.2: Orders → Payments (criação de PaymentIntent) — implementa RN16**
+  - [ ] Task 9.2.1: Criar em Payments o endpoint interno `POST /internal/payment-intents`, protegido por `verifyInternalToken`, recebendo `{ pedidoId, total }`, chamando `stripeService.criarPaymentIntent` (assinatura simplificada da Task 8.3.2) e retornando `{ paymentIntentId, clientSecret }` (critério de aceite: sem token válido → 401; token válido + Stripe mockado com sucesso → 200 com os 2 campos; Stripe mockado com erro → 502 via `PaymentGatewayError` local de Payments)
+  - [ ] Task 9.2.2: Em Orders, criar `payments.internalClient.ts` que monta `Authorization` via `mintInternalToken(PAYMENTS_BASE_URL)` e faz `POST {PAYMENTS_BASE_URL}/internal/payment-intents`, com `PAYMENTS_BASE_URL` configurada via env/Secret (URL real do codebase `payments` gerada no deploy) (critério de aceite: cliente testável com chamada HTTP mockada; erro de rede ou resposta não-2xx é traduzido em `PaymentGatewayError` do lado de Orders)
+  - [ ] Task 9.2.3: Atualizar `criarPedidoComPagamento` (Orders) para usar o cliente da Task 9.2.2 no lugar do import direto de `stripeService` (Task 8.2.2), preservando a mesma sequência transacional e a mesma compensação já validada na Fase 2 — implementa **RN16** (critério de aceite: contrato de `POST /pedidos` para o cliente final não muda — mesmo 201 com `paymentIntentId`/`paymentClientSecret`, mesmo 502 em falha — validado por teste de regressão herdado da Fase 2)
+  Dependências: Épico 9.1; Épicos 8.2/8.3.
+
+- **Épico 9.3: Payments → Orders (efetivação de status via webhook) — implementa RN17**
+  - [ ] Task 9.3.1: Criar em Orders `POST /internal/pedidos/:id/confirmar-pagamento` e `POST /internal/pedidos/:id/cancelar-por-falha-pagamento`, protegidos por `verifyInternalToken`, delegando para `confirmarPagamentoPedido`/`cancelarPedidoPorFalhaPagamento` (Task 8.2.3) — implementa **RN17** (critério de aceite: sem token válido → 401; pedido `pendente` → 200 e transição efetivada, idêntico ao comportamento direto da Fase 2; pedido inexistente ou fora de `pendente` → 200 noop, RN15 preservada)
+  - [ ] Task 9.3.2: Em Payments, criar `orders.internalClient.ts` (mesmo padrão da Task 9.2.2, espelhado) usado pelo handler do webhook para chamar os 2 endpoints da Task 9.3.1 no lugar do import direto de `pedidosService` — implementa **RN17** (critério de aceite: handler do webhook chama o endpoint correto por tipo de evento, mesmo mapeamento de RN12/RN13; a checagem de idempotência — RN14, `stripeEvents` — continua ocorrendo em Payments **antes** de qualquer chamada HTTP a Orders)
+  - [ ] Task 9.3.3: Confirmar (inspeção de código + teste) que Payments nunca escreve diretamente na coleção `pedidos` do Firestore, conforme exigência explícita da spec (critério de aceite: nenhuma referência a `pedidosCollection`/`.collection("pedidos")` em `services/payments/`; suíte de testes de Payments não instancia nenhum repositório de pedidos)
+  - [ ] Task 9.3.4: Confirmar (teste + inspeção) a semântica de falha da Decisão técnica 6: se a chamada interna a Orders falhar, a exceção propaga e o webhook responde 5xx ao Stripe **sem** chamar `registrarEventoProcessado`, permitindo reentrega natural do Stripe (critério de aceite: com o cliente interno de Orders mockado para rejeitar, a resposta do webhook é 5xx e nenhum documento é criado em `stripeEvents`)
+  Dependências: Épico 9.1; Épicos 8.2/8.3; Task 9.3.2 depende da Task 9.3.1 já existir.
+
+#### Rastreabilidade RN16-RN18 → Tasks (Módulo 9)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN16 | Orders chama Payments via HTTP síncrono interno para criar PaymentIntent; contrato externo de `POST /pedidos` inalterado | 9.1.1, 9.2.1, 9.2.2, 9.2.3 |
+| RN17 | Payments chama endpoint interno de Orders para efetivar transição de status via webhook; Payments nunca escreve em `pedidos` | 9.1.1, 9.3.1, 9.3.2, 9.3.3 |
+| RN18 | Toda chamada interna exige ID token Google válido, verificado pelo receptor; sem token/token inválido → 401 | 9.1.1, 9.1.2, 9.1.3, 9.1.4, 9.1.5 |
+
+---
+
+### Módulo 10: Serviço Notifications (novo)
+
+> Implementa RN19.
+
+- **Épico 10.1: Cliente Resend**
+  - [ ] Task 10.1.1: Adicionar dependência `resend` a `services/notifications/package.json`, criar `resendClient.ts` com `getResendClient()` singleton (mesmo padrão de `firebaseAdmin.ts`/`stripeClient.ts`), lendo `RESEND_API_KEY` de env/Secret Manager (critério de aceite: `getResendClient()` retorna instância; ausência da env var lança erro claro e imediato, testável isoladamente)
+  - [ ] Task 10.1.2: Documentar `RESEND_API_KEY` em `.env.example` de Notifications (valor dummy, modo sandbox do Resend) (critério de aceite: `.env.example` lista a variável com comentário explicando o modo sandbox/teste)
+  Dependências: Épico 8.4.
+
+- **Épico 10.2: Firestore Trigger e envio de e-mail — implementa RN19**
+  - [ ] Task 10.2.1: Criar `onPedidoStatusChange` (`onDocumentUpdated("pedidos/{pedidoId}", ...)`, Cloud Functions 2ª geração) comparando `event.data.before.status` com `event.data.after.status`; dispara a lógica de e-mail **somente** quando o status muda e o novo valor é `confirmado` ou `cancelado` — reflete a Decisão técnica 5 (critério de aceite: update do documento que não altera `status` não dispara envio, testável no emulator; update para `confirmado`/`cancelado` dispara; update para `enviado`/`entregue`/`pendente` não dispara)
+  - [ ] Task 10.2.2: Resolver o e-mail do cliente dono via `admin.auth().getUser(pedido.clienteId).email` — reflete a Decisão técnica 5 (critério de aceite: para `clienteId` válido no Auth Emulator, o e-mail resolvido bate com o cadastrado; para `clienteId` sem usuário correspondente, tratado como falha best-effort, sem lançar exceção não tratada)
+  - [ ] Task 10.2.3: Montar e enviar o e-mail via `resend.emails.send(...)` com template mínimo (assunto/corpo variam conforme `confirmado`/`cancelado`, incluindo `pedidoId` e `total`) — implementa **RN19** (critério de aceite: com Resend mockado, a chamada de envio recebe destinatário/assunto/corpo corretos para cada um dos 2 status)
+  - [ ] Task 10.2.4: Tratamento best-effort de falha: qualquer exceção do SDK do Resend (ou de `getUser`) é capturada e logada, a function encerra com sucesso — nunca reverte ou bloqueia a transição de status já efetivada por Orders (que já ocorreu antes do trigger disparar) — implementa explicitamente a cláusula best-effort de **RN19** (critério de aceite: com o SDK do Resend mockado para lançar erro, `onPedidoStatusChange` completa sem erro não tratado no emulator, e um log de erro é produzido)
+  Dependências: Épico 10.1; Épico 8.2 (coleção `pedidos` já gerenciada por Orders).
+
+#### Rastreabilidade RN19 → Tasks (Módulo 10)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN19 | Notifications envia e-mail em transição para `confirmado`/`cancelado`; falha é best-effort, nunca bloqueia a transição | 10.2.1, 10.2.2, 10.2.3, 10.2.4 |
+
+---
+
+### Módulo 11: API Gateway (Firebase Hosting)
+
+> Implementa RN20.
+
+- **Épico 11.1: Configuração de rewrites**
+  - [ ] Task 11.1.1: Adicionar bloco `hosting` a `firebase.json` com `rewrites`: `/produtos/**` e `/pedidos/**` → function `orders-api`, `/webhooks/stripe` → function `payments-api` — implementa **RN20** (critério de aceite: `firebase.json` válido; a regra mais específica (`/webhooks/stripe`) precede regras genéricas, testável no Hosting Emulator)
+  - [ ] Task 11.1.2: Confirmar que Notifications não é referenciada em nenhum rewrite e não expõe nenhum `onRequest`/`onCall` — só o trigger Firestore da Task 10.2.1 — implementa a cláusula final de **RN20** (critério de aceite: inspeção de `services/notifications/src/index.ts` confirma zero exports HTTP; nenhuma entrada de Notifications em `hosting.rewrites`)
+  - [ ] Task 11.1.3: Validar end-to-end no Hosting Emulator; decisão técnica complementar: `/health` de cada serviço permanece acessível apenas via URL direta da function (sem rewrite dedicado no gateway), já que a spec só exige `/produtos`, `/pedidos` e `/webhooks/stripe` roteados publicamente (critério de aceite: `curl` contra o domínio do Hosting Emulator para `/produtos` e `/webhooks/stripe` chega no serviço correto; paths não mapeados retornam o 404 padrão do Hosting)
+  Dependências: Épico 8.5 (nomes de export definidos); Módulos 9 e 10 completos (serviços já corretos antes de expostos atrás do gateway).
+
+#### Rastreabilidade RN20 → Tasks (Módulo 11)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN20 | Gateway roteia `/produtos`/`/pedidos` → Orders, `/webhooks/stripe` → Payments; Notifications sem rota pública | 11.1.1, 11.1.2, 11.1.3 |
+
+---
+
+### Módulo 12: Testes e regressão
+
+> Cobre RN16-RN20 e confirma zero regressão em RN01-RN15. Tabela de rastreabilidade consolidada ao final.
+
+- **Épico 12.1: Redistribuição da suíte existente (63 testes) — confirma zero regressão em RN01-RN15**
+  - [ ] Task 12.1.1: Mover os testes de Produtos/Pedidos (Fase 1, RN01-RN09) para `services/orders/test/`, ajustando imports para os paths do novo codebase, sem alterar nenhum assert (critério de aceite: suíte roda com `npm test` dentro de `services/orders`, mesma contagem de testes/asserts da Fase 1)
+  - [ ] Task 12.1.2: Mover os testes de Stripe/webhook (Fase 2, RN10-RN15): a parte que exercita `stripeService`/webhook diretamente vai para `services/payments/test/`; a parte que exercita `criarPedidoComPagamento`/`confirmarPagamentoPedido`/`cancelarPedidoPorFalhaPagamento` vai para `services/orders/test/`, agora mockando a chamada HTTP interna em vez do import direto (critério de aceite: os 14 testes da Fase 2, ou seus equivalentes 1:1, continuam verdes, redistribuídos conforme a fronteira do Módulo 9, sem perda de cenário)
+  - [ ] Task 12.1.3: Rodar as 3 suítes (Orders/Payments/Notifications) e confirmar zero regressão: soma total de testes ≥63 (herdados de Fases 1+2) mais os novos dos Módulos 9-11 (critério de aceite: `npm test` verde em cada uma das 3 pastas)
+  Dependências: Módulos 8 e 9 completos.
+
+- **Épico 12.2: Testes de comunicação síncrona — cobre RN16-RN18**
+  - [ ] Task 12.2.1: Teste de `POST /pedidos` (Orders) com cliente interno de Payments mockado com sucesso → 201 com `paymentIntentId`/`paymentClientSecret` — cobre **RN16**
+  - [ ] Task 12.2.2: Teste de `POST /pedidos` com cliente interno de Payments mockado falhando (rede ou 401) → 502 para o cliente final, pedido compensado (cancelado, estoque restaurado) — cobre **RN16**, **RN18**
+  - [ ] Task 12.2.3: Teste unitário de `verifyInternalToken` (suíte duplicada em Orders e Payments): sem token → 401; assinatura inválida (mockada) → 401; `aud` errado → 401; `email` fora da allow-list → 401; token válido → segue adiante — cobre **RN18**
+  - [ ] Task 12.2.4: Teste de `POST /internal/payment-intents` (Payments) e dos 2 endpoints internos de Orders sem header `Authorization` → 401 em todos — cobre **RN18**
+  - [ ] Task 12.2.5: Teste de fluxo simulando `payment_intent.succeeded` no webhook de Payments com o cliente interno de Orders mockado → confirma chamada ao endpoint correto de Orders com o `pedidoId` certo — cobre **RN17**
+  - [ ] Task 12.2.6: Teste de falha na chamada interna Payments→Orders → resposta 5xx ao Stripe, nenhum registro em `stripeEvents` — cobre **RN17**, valida a Decisão técnica 6
+  Dependências: Épico 12.1; Módulo 9.
+
+- **Épico 12.3: Testes de Notifications — cobre RN19**
+  - [ ] Task 12.3.1: Teste de `onPedidoStatusChange` disparando e-mail em transição para `confirmado`, com Resend e `admin.auth().getUser` mockados — cobre **RN19**
+  - [ ] Task 12.3.2: Teste de `onPedidoStatusChange` disparando e-mail em transição para `cancelado` — cobre **RN19**
+  - [ ] Task 12.3.3: Teste de `onPedidoStatusChange` **não** disparando e-mail quando `status` não muda (ex.: update que só altera `paymentIntentId`) — cobre **RN19**
+  - [ ] Task 12.3.4: Teste de falha do Resend mockada (rejeita) → função completa sem erro não tratado, nenhuma exceção propagada — cobre a cláusula best-effort de **RN19**
+  Dependências: Módulo 10.
+
+- **Épico 12.4: Testes do API Gateway — cobre RN20**
+  - [ ] Task 12.4.1: Teste (Hosting Emulator, ou validação estática de `firebase.json`) confirmando que `/produtos`/`/pedidos` roteiam para Orders e `/webhooks/stripe` roteia para Payments — cobre **RN20**
+  Dependências: Módulo 11.
+
+- **Épico 12.5: Cobertura e rastreabilidade final**
+  - [ ] Task 12.5.1: Configurar/copiar o threshold de cobertura ≥70% (herdado da Task 3.5.1) em cada um dos 3 `package.json` (`test:coverage` por codebase) (critério de aceite: os 3 comandos falham se qualquer métrica ficar abaixo de 70%)
+  - [ ] Task 12.5.2: Produzir, em conjunto com o agente qa-negocio, a tabela final de rastreabilidade RN16-RN20 → testes automatizados, consolidando com as tabelas já existentes de RN01-RN15 (critério de aceite: tabela sem nenhuma RN16-RN20 órfã de teste)
+  Dependências: Épicos 12.1-12.4 completos.
+
+#### Rastreabilidade RN16-RN20 → Tasks de teste (consolidada, Módulo 12)
+
+| Regra | Tasks de teste que cobrem |
+|---|---|
+| RN16 | 12.2.1, 12.2.2 |
+| RN17 | 12.2.5, 12.2.6 |
+| RN18 | 12.2.3, 12.2.4 |
+| RN19 | 12.3.1, 12.3.2, 12.3.3, 12.3.4 |
+| RN20 | 12.4.1 |
+
+---
+
+### Fora de escopo desta rodada (delegado diretamente ao devops-tech-writer a partir da spec)
+
+Os Requisitos de DevOps & Doc da Fase 3 (seção 4 da spec): novo segredo `RESEND_API_KEY` via Secret Manager; workflows de CI/CD adaptados para múltiplos codebases (lint/build/test por serviço; deploy por codebase, `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`); README com diagrama textual da nova arquitetura (3 serviços + gateway), como rodar todos os serviços localmente no Emulator Suite, e como testar o fluxo de notificação por e-mail manualmente; mesma estratégia de deploy manual (`workflow_dispatch`) já usada nas Fases 1/2. A execução real do corte de produção (Épico 8.6) depende diretamente da Task 4.4.3 já existente (credenciais de deploy) e de credenciais adicionais para as 2 novas service accounts de runtime (Task 9.1.3/9.1.4) — coordenação necessária com o agente devops-tech-writer antes da Task 8.6.1.
+
+### Bloqueios (a levar de volta ao agente clarificador)
+
+Nenhum bloqueio de negócio identificado nesta rodada. Todas as questões levantadas durante o planejamento eram de natureza técnica/arquitetural (mecanismo exato de emissão/validação de ID token Google em Cloud Functions 2ª geração; fronteira de extração do código Stripe e simplificação do contrato entre Orders e Payments; decisão de duplicar vs. compartilhar utilitários pequenos; sequência de corte de produção sem downtime; forma de resolver o e-mail do cliente em Notifications sem duplicar dado no modelo `Pedido`; semântica de retry quando a chamada interna Payments→Orders falha) e foram resolvidas e documentadas na seção "Decisões técnicas registradas nesta rodada" acima, sem necessidade de reabrir RN16-RN20.
