@@ -4,7 +4,7 @@ API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, 
 
 Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
-> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **implementada e mesclada em `main`** (código + testes verdes), mas **ainda não deployada em produção real** — decisão deliberada do usuário. Fase 4 (front-end de testes, `web/`) está implementada. Fase 5 (cancelamento pós-pagamento e reembolso, e a correção do bug do webhook) está **implementada, deployada e validada de ponta a ponta em produção real** (modo teste do Stripe). O monólito `functions/` (codebase `default`) continua sendo o único deployado, servindo 100% do tráfego real, até o corte de produção da Fase 3 ser deliberadamente executado. Ver [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços) abaixo.
+> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **implementada, deployada em produção real e validada de ponta a ponta** (Épico 8.6) — o monólito (`functions/`, codebase `default`) foi **deliberadamente decomissionado** após a validação. Fase 4 (front-end de testes, `web/`) está implementada. Fase 5 (cancelamento pós-pagamento e reembolso, e a correção do bug do webhook) está **implementada, deployada e validada de ponta a ponta em produção real** (modo teste do Stripe), hoje rodando nos codebases `orders`/`payments` da Fase 3. Ver [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços) abaixo.
 
 ## Estado atual do projeto
 
@@ -17,7 +17,7 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 
 **Fase 4 (front-end de testes, `web/`): implementada e mesclada em `main`.** SPA React + Vite + TypeScript, em `web/` na raiz do monorepo, para exercitar visualmente a API do monólito da Fase 1+2 (`functions/`) rodando **exclusivamente contra o Firebase Emulator Suite local** — nunca um projeto Firebase real (RN27). Não é o produto final do portfólio (esse é a API): é uma ferramenta de teste/demonstração com dois perfis, Cliente e Administrador. Lint, build e testes (Vitest + React Testing Library) verdes localmente e no `ci-web.yml`. Documentação de como rodar `web/` junto com o emulador está na seção [Front-end de testes (Fase 4) — `web/`](#front-end-de-testes-fase-4--web) abaixo.
 
-**Fase 3 (microsserviços): implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); todos sobem juntos no Emulator Suite e passam no CI (`ci-services.yml`). A produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual (`default`) — o corte de produção (Épico 8.6 do `BACKLOG.md`) fica pendente até o usuário decidir promover o projeto. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços).
+**Fase 3 (microsserviços): implementada, deployada em produção real e validada de ponta a ponta (Épico 8.6).** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting, `https://gscandelari-ecommerce-api.web.app`). O corte de produção (Épico 8.6) foi executado e validado com uma compra real de ponta a ponta pelo novo domínio (criar pedido → PaymentIntent real via chamada interna Orders→Payments → pagamento confirmado → webhook do Stripe migrado para a nova URL → pedido confirmado via chamada interna Payments→Orders → e-mail real via Resend), e o monólito (codebase `default`, `functions/`) foi **deliberadamente decomissionado** (Task 8.6.3) — a URL antiga `.../api/health` não responde mais. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços).
 
 **Fase 5 (cancelamento pós-pagamento e reembolso): implementada, deployada e validada de ponta a ponta em produção real.** Emenda RN05/RN06/RN07 (Fase 1) e o modelo de pagamento (Fase 2) para permitir que o Cliente cancele também um pedido `confirmado`, introduz o status intermediário `aguardando_devolucao` para cancelamento a partir de `enviado`, e adiciona uma ação dedicada de reembolso via Stripe para o Admin (RN28-RN33) — sempre manual e deliberada, nunca automática. Também corrige um bug real encontrado testando a Fase 4 de ponta a ponta: o webhook do Stripe (`POST /webhooks/stripe`) nunca validava a assinatura corretamente através do Functions Framework (`req.body` já vinha parseado, não cru) — corrigido usando `req.rawBody`. `functions/` (92 testes), `services/orders`+`services/payments` (93+33 testes, réplica sem deploy) e `web/` (37 testes) todos verdes. Validado com uma compra real em modo teste do Stripe: criar → pagar → confirmar automaticamente via webhook → cancelar → reembolsar, com o refund conferido diretamente na API do Stripe (ver [Deploy](#deploy) para os pré-requisitos de infraestrutura descobertos nessa validação). Documentação da máquina de estados estendida está na seção [Máquina de estados do Pedido — status e pagamento](#máquina-de-estados-do-pedido--status-e-pagamento) abaixo.
 
@@ -200,9 +200,9 @@ npm run format:check   # Prettier (use `npm run format` para corrigir)
 ├── web/                        # Fase 4: front-end de testes (React + Vite + TS),
 │                                 # só contra o Emulator Suite local (RN27). Ver
 │                                 # "Front-end de testes (Fase 4)" para detalhes.
-└── services/                  # Fase 3 (microsserviços) — implementada, mesclada
-                                # em main (PR #1), ainda não deployada em produção
-                                # real. Ver "Arquitetura da Fase 3" para detalhes.
+└── services/                  # Fase 3 (microsserviços) — implementada e deployada
+                                # em produção real (Épico 8.6); monólito default
+                                # decomissionado. Ver "Arquitetura da Fase 3".
     ├── orders/                 # produtos + pedidos (RN01-RN09, RN16-RN18)
     ├── payments/                # Stripe + webhook (RN10-RN15, RN16-RN18)
     └── notifications/            # e-mail via Resend, sem rota HTTP (RN19-RN20)
@@ -214,22 +214,24 @@ npm run format:check   # Prettier (use `npm run format` para corrigir)
 
 Workflows em `.github/workflows/`:
 
-- **`ci.yml`** — roda em todo Pull Request para `main` e em todo push em `main`. Etapas: `npm ci` (instala dependências), `npm run lint`, `npm run build`, `npm run test:coverage:emulator` (Jest + Supertest contra o Firebase Emulator Suite, com o mesmo `firebase-tools` travado no `package-lock.json`). Nenhuma etapa de CI toca um projeto Firebase real. Este workflow é o check obrigatório configurado na proteção da branch `main` (ver `CONTRIBUTING.md`). **Cuida exclusivamente de `functions/` (Fase 1+2, em produção) e não foi alterado pela Fase 3.**
-- **`deploy.yml`** — deploy para Firebase Functions (`functions/`, codebase `default`, Fase 1+2). Ver decisão detalhada abaixo. **Não foi alterado pela Fase 3** — continua deployando somente o monólito atual.
-- **`ci-services.yml`** (Fase 3) — roda lint/build/test **de forma independente** para cada um dos 3 serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, disparado em push/PR para `main` que tocam `services/**`. Não interfere em `ci.yml`/`deploy.yml` nem nos checks obrigatórios de `main`. Verde hoje (código implementado, ver [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços)). **Não existe workflow de deploy para os novos serviços** — deploy real é a última etapa da Fase 3 (Épico 8.6), disparada manualmente e só com aprovação explícita do usuário.
+- **`ci.yml`** — roda em todo Pull Request para `main` e em todo push em `main`. Etapas: `npm ci` (instala dependências), `npm run lint`, `npm run build`, `npm run test:coverage:emulator` (Jest + Supertest contra o Firebase Emulator Suite, com o mesmo `firebase-tools` travado no `package-lock.json`). Nenhuma etapa de CI toca um projeto Firebase real. Este workflow é o check obrigatório configurado na proteção da branch `main` (ver `CONTRIBUTING.md`). **Cuida de `functions/` — código histórico das Fases 1+2 original, preservado no repositório como referência, mas não deployado desde o decomissionamento do monólito (Épico 8.6, Task 8.6.3).**
+- **`deploy.yml`** — **removido no Épico 8.6 (Task 8.6.3)**: deployava exclusivamente `functions:default` (o monólito), que foi decomissionado (`firebase functions:delete api`) — o workflow ficaria permanentemente quebrado tentando deployar um codebase que não existe mais em `firebase.json`. `functions/` continua no repositório e passa em `ci.yml`, só não tem mais deploy associado.
+- **`ci-services.yml`** (Fase 3) — roda lint/build/test **de forma independente** para cada um dos 3 serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, disparado em push/PR para `main` que tocam `services/**`. Verde (código em produção real, ver [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços)).
+- **`deploy-services.yml`** (Fase 3) — deploy manual (`workflow_dispatch` + confirmação digitada + `environment: production`, mesmo padrão de segurança que `deploy.yml` tinha) para os 3 codebases (`orders`/`payments`/`notifications`) + Hosting. O corte de produção inicial (bootstrap, Épico 8.6) foi feito manualmente via CLI local (exigia 2 passes de deploy para descobrir as URLs reais do Cloud Run antes de preenchê-las); este workflow cobre deploys subsequentes de código.
 - **`ci-web.yml`** (novo, Fase 4) — mesmo padrão de `ci-services.yml`, aplicado a `web/`: `npm ci`, lint, `format:check` (Prettier), build (TypeScript + Vite) e testes (Vitest + React Testing Library, com `fetch`/Firebase Auth mockados — nunca depende do Emulator Suite rodando em CI). Disparado em push/PR para `main` que tocam `web/**`. **Sem step de deploy** — a aplicação `web/` não é publicada nesta fase (uso local/experimentação contra o Emulator Suite, decisão explícita do usuário, ver [Front-end de testes (Fase 4)](#front-end-de-testes-fase-4--web) abaixo). Não é (ainda) um check obrigatório de nenhuma branch protection, mesmo padrão de `ci-services.yml`.
 
 ## Deploy
 
-### Estado atual: projeto real provisionado, CD automatizado validado, Fases 1, 2 e 5 no ar
+### Estado atual: projeto real provisionado, arquitetura de microsserviços em produção (Épico 8.6)
 
 - **Projeto Firebase (Blaze):** `gscandelari-ecommerce-api` ([console](https://console.firebase.google.com/project/gscandelari-ecommerce-api/overview)), alias `production` em `.firebaserc`.
-- **Function URL:** `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api` (`/health`, `/docs`, `/produtos`, `/pedidos`, `/webhooks/stripe`, `/pedidos/:id/reembolsar`).
+- **API Gateway (Firebase Hosting):** `https://gscandelari-ecommerce-api.web.app` (`/produtos`, `/pedidos`, `/docs`, `/health`, `/webhooks/stripe`) — ver [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços) para o roteamento completo. O monólito (`.../api/*`) foi decomissionado (Task 8.6.3); a URL antiga não responde mais.
 - **Política de limpeza do Artifact Registry** configurada (`firebase functions:artifacts:setpolicy`, imagens de container antigas removidas após 1 dia) — evita custo de armazenamento acumulado.
-- **Deploy via GitHub Actions validado de ponta a ponta** (`workflow_dispatch`, secret `FIREBASE_SERVICE_ACCOUNT_KEY` configurado): lint, build, testes contra o Emulator Suite e `firebase deploy --only functions:default` reais, do runner do GitHub até o projeto Firebase real — escopo explícito ao codebase `default` desde a Fase 5 (ver nota abaixo).
+- **Deploy via GitHub Actions** (`deploy-services.yml`): `workflow_dispatch`, secret `FIREBASE_SERVICE_ACCOUNT_KEY` configurado, reexecuta lint/build/test dos 3 serviços antes de `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`.
 - **Branch protection** ativa em `main` (PR obrigatório + check de CI obrigatório).
-- Segredos do Stripe (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, modo teste) configurados no Firebase Secret Manager — Fase 2 deployada.
-- **Fase 5 (cancelamento/reembolso + correção do bug do webhook) validada de ponta a ponta em produção real** (modo teste do Stripe): pedido criado → PaymentIntent real → pago via cartão de teste → webhook real confirmou o pedido automaticamente (`confirmado`/`pago`) → cancelado (`estorno_pendente`) → reembolsado via `PATCH /pedidos/:id/reembolsar`, refund `succeeded` conferido diretamente na API do Stripe. Dados de teste usados nessa validação foram removidos depois (produto, pedido, usuários).
+- Segredos do Stripe (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, modo teste) e do Resend (`RESEND_API_KEY`, modo sandbox) configurados no Firebase Secret Manager, acessíveis apenas pelas service accounts de runtime que precisam deles (`payments-runtime@` para o Stripe; a function de Notifications para o Resend).
+- **Épico 8.6 (corte de produção da Fase 3) validado de ponta a ponta em produção real** (modo teste do Stripe), pelo novo domínio: pedido criado → PaymentIntent real via chamada interna Orders→Payments (RN16) → pago via cartão de teste → webhook do Stripe (migrado para a nova URL) confirmou o pedido via chamada interna Payments→Orders (RN17) → e-mail real via Resend confirmado no destinatário. Dados de teste usados nessa validação foram removidos depois (produtos, pedidos, usuários).
+- **Fase 5 (cancelamento/reembolso + correção do bug do webhook) validada de ponta a ponta em produção real** (modo teste do Stripe, ainda no monólito antes do corte): pedido criado → PaymentIntent real → pago via cartão de teste → webhook real confirmou o pedido automaticamente (`confirmado`/`pago`) → cancelado (`estorno_pendente`) → reembolsado via `PATCH /pedidos/:id/reembolsar`, refund `succeeded` conferido diretamente na API do Stripe. Essa mesma lógica hoje roda em `services/orders`+`services/payments`.
 
 **Papéis da Service Account de deploy** (`github-actions-deploy@gscandelari-ecommerce-api.iam.gserviceaccount.com`), descobertos por tentativa/erro real contra o deploy (a lista abaixo é o mínimo que efetivamente funcionou, não uma lista teórica): Cloud Functions Admin, Cloud Run Admin, Artifact Registry Administrator, Cloud Build Editor, Service Account User, Firebase Admin, Service Usage Admin (necessário para o deploy habilitar `cloudbilling.googleapis.com` sozinho), Secret Manager Secret Accessor e Secret Manager Admin (necessário para o deploy conceder acesso ao secret para a service account de runtime das Functions).
 
@@ -244,24 +246,32 @@ O deploy de *código* (`deploy.yml`) sempre funcionou desde a Fase 1, mas até a
 
 Nenhum destes é necessário para os Emulators locais (que já vêm com Auth/Firestore prontos por padrão) — só para uma instância real do zero.
 
+### Bugs reais encontrados no corte de produção da Fase 3 (Épico 8.6)
+
+Assim como a validação da Fase 5 acima, o corte de produção da Fase 3 só foi possível de verificar de verdade contra um deploy real — nenhum destes quatro bugs foi (ou poderia ter sido) pego pelo Emulator Suite nem pelos testes Jest/Supertest:
+
+1. **Nome de export precisa ser um identificador JS válido.** Um export renomeado via string-literal (`export { ordersApi as "orders-api" }`) funciona no Emulator Suite (que introspecciona os exports diretamente), mas quebra a resolução de `entry_point` do Cloud Functions real (`Function 'orders.api' is not defined in the provided module`).
+2. **Codebases não namespaceiam o ID da function automaticamente.** A suposição documentada originalmente na Task 8.5.2 ("Firebase prefixa automaticamente pelo nome do codebase") nunca tinha sido verificada contra um deploy real e estava errada: o ID final é literalmente o identificador exportado, único por **projeto+região**, não por codebase. Dois codebases exportando `api` colidem (`More than one codebase claims functions/api`). Fix: identificadores únicos por codebase (`ordersApi`, `paymentsApi`).
+3. **Opções de build-time não podem ler `process.env.X` direto.** `serviceAccount: process.env.RUNTIME_SERVICE_ACCOUNT_EMAIL` sempre resolvia `undefined` num deploy real: o Firebase CLI faz o `require()` do codebase pra descobrir as functions (avaliando esse literal de opções) **antes** de carregar o `.env.<project-id>` em `process.env` — esse `.env` só é injetado numa fase posterior, exclusivamente pro runtime da function. Resultado silencioso: nenhum erro, mas a function rodava sob a service account default do Compute Engine em vez da SA dedicada de menor privilégio. Fix: API de Parameterized Configuration do `firebase-functions` v2 (`defineString`), que devolve uma `Expression<string>` resolvida numa fase posterior do deploy, já com o `.env` carregado.
+4. **O SDK do Resend não lança exceção em erros de nível de API.** `emails.send()` devolve `{ data: null, error }` em vez de lançar — sem checar esse campo explicitamente, uma rejeição da API (ex.: sandbox recusando o destinatário) passava batido, sem nenhum log, indistinguível de um envio bem-sucedido. Só descoberto no smoke test real: o e-mail não chegou, mas não havia nenhum `console.error` nos logs. Fix: desestruturar `{ error }` do retorno e logar quando presente (continua best-effort, RN19 — nunca lança, nunca bloqueia a transição de status).
+
 ### Decisão registrada (Task 4.5.1 do `BACKLOG.md`): deploy MANUAL
 
 O deploy a partir de `main` é **manual**, disparado via `workflow_dispatch` (botão "Run workflow" no GitHub Actions, com um campo de confirmação obrigatório) ou via CLI local, e **não** automático a cada merge em `main`. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo ainda assim `main` sempre *deployável* (princípio central do GitHub Flow). Essa decisão pode ser revisitada (trocando o gatilho para `push` em `main`) quando o time preferir deploy contínuo.
 
 ### Deploy manual via GitHub Actions
 
-1. Garanta que `main` está com o CI verde (badge/check do workflow `ci.yml`).
-2. Vá em GitHub > Actions > workflow **"Deploy Firebase Functions"** > "Run workflow", selecione a branch `main`, digite `deploy` no campo de confirmação e execute.
-3. O workflow reexecuta lint + build + testes antes de deployar (defesa em profundidade) e então roda `firebase deploy --only functions:default` — escopo explícito ao codebase `default` (Fase 1+2+5); sem isso, desde que `firebase.json` passou a declarar múltiplos codebases (Fase 3), um `--only functions` sem escopo deployaria também `orders`/`payments`/`notifications`, cujo corte de produção é deliberadamente separado (Épico 8.6, ver [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços)).
+1. Garanta que `main` está com o CI verde (badge/check do workflow `ci.yml`/`ci-services.yml`).
+2. Vá em GitHub > Actions > workflow **"Deploy Microsserviços (Fase 3)"** > "Run workflow", selecione a branch `main`, digite `deploy` no campo de confirmação e execute.
+3. O workflow reexecuta lint + build + testes dos 3 serviços antes de deployar (defesa em profundidade) e então roda `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting` — nunca inclui o monólito (decomissionado, Task 8.6.3).
 
 ### Deploy manual via Firebase CLI (local)
 
 ```bash
-cd functions
-npm run build
-npm run test:emulator          # garanta que a suíte passa antes de deployar
-cd ..
-npx firebase-tools deploy --only functions:default --project production
+cd services/orders && npm run build && npm run test:emulator && cd ../..
+cd services/payments && npm run build && npm run test:emulator && cd ../..
+cd services/notifications && npm run build && npm run test:emulator && cd ../..
+npx firebase-tools deploy --only functions:orders,functions:payments,functions:notifications,hosting --project production
 ```
 
 Nunca rode `firebase deploy` apontando para o alias `default`/demo — ele existe apenas para os emuladores.
@@ -376,9 +386,11 @@ Hoje em produção (Fase 2, RN10-RN15):
 
 ## Arquitetura da Fase 3 (Microsserviços)
 
-> **Status: implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Esta seção documenta a arquitetura da Fase 3 (`SPEC.md` seção "Fase 3", `BACKLOG.md` Módulos 8-12), hoje totalmente implementada em `main`: os 3 novos serviços (código + testes + lint) e o `firebase.json` com os 4 codebases. **Nada disto está deployado ainda.** A produção real do projeto (`gscandelari-ecommerce-api`) continua rodando exclusivamente o monólito da Fase 1+2 (`functions/`, codebase `default`, function `api`), servindo 100% do tráfego real sem qualquer interrupção — inclusive o webhook do Stripe, cadastrado no Dashboard real (modo teste) apontando para a URL do monólito. `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); o corte de produção real (Épico 8.6 do `BACKLOG.md`) é a única etapa ainda pendente, aguardando decisão explícita do usuário.
+> **Status: implementada, deployada em produção real e validada de ponta a ponta (Épico 8.6 do `BACKLOG.md`).** Esta seção documenta a arquitetura da Fase 3 (`SPEC.md` seção "Fase 3", `BACKLOG.md` Módulos 8-12): os 3 serviços (`services/orders/`, `services/payments/`, `services/notifications/`) rodam em produção real (`gscandelari-ecommerce-api`) atrás do Firebase Hosting como API Gateway (`https://gscandelari-ecommerce-api.web.app`), cada um sob sua própria service account de runtime dedicada e menor privilégio (`orders-runtime@`/`payments-runtime@`, Task 9.1.3/9.1.4). O webhook do Stripe (Dashboard, modo teste) foi migrado para a nova URL pública de Payments. **O monólito da Fase 1+2 (`functions/`, codebase `default`, function `api`) foi deliberadamente decomissionado** (Task 8.6.3): removido de `firebase.json` e excluído via `firebase functions:delete api` — a URL antiga não responde mais. O código de `functions/` permanece no repositório como referência histórica (Fases 1, 2 e 5 originais), mas não é mais deployado nem tem workflow de deploy associado.
+>
+> **Bugs reais encontrados só no deploy real** (nunca pegos pelo Emulator Suite nem pelos testes Jest/Supertest — ver histórico de commits do Épico 8.6 para os detalhes completos de cada um): nome de export precisa ser um identificador JS válido, não um string-literal renomeado; o ID final da function é o identificador exportado, sem namespace automático por codebase (dois codebases exportando o mesmo nome colidem); opções de build-time como `serviceAccount` não podem ler `process.env.X` direto — precisam da API de Parameterized Configuration (`defineString`) porque o `.env.<project-id>` só é carregado numa fase posterior à avaliação dessas opções; e o SDK do Resend não lança exceção em erros de nível de API (retorna `{ data: null, error }`), exigindo checagem explícita do campo `error`.
 
-### Diagrama (arquitetura alvo)
+### Diagrama (arquitetura em produção)
 
 ```
                               ┌───────────────────────────┐
@@ -433,12 +445,12 @@ Hoje em produção (Fase 2, RN10-RN15):
    cd services/payments && npm install && cd ../..
    cd services/notifications && npm install && cd ../..
    ```
-2. `firebase.json` já declara um array `codebases` com `default` (`functions/`, Fase 1+2), `orders` (`services/orders`), `payments` (`services/payments`) e `notifications` (`services/notifications`). O mesmo comando já usado para a Fase 1+2 sobe os 4 codebases simultaneamente a partir da raiz do repositório:
+2. `firebase.json` declara um array `codebases` com `orders` (`services/orders`), `payments` (`services/payments`) e `notifications` (`services/notifications`) — o codebase `default` (`functions/`, monólito) foi removido daqui no Épico 8.6 (Task 8.6.3), embora o código continue no repositório. Suba os 3 codebases simultaneamente a partir da raiz do repositório:
    ```bash
    npx firebase-tools emulators:start
    ```
-   Isso sobe Auth + Firestore + Functions (4 codebases) + Hosting (gateway, Módulo 11) no mesmo Emulator UI (`localhost:4000`), sempre contra o projeto demo `demo-gscandelari-ecommerce-api` — nunca um projeto real, mesma garantia já documentada para a Fase 1+2.
-3. Convenção de nomes de export por codebase (Task 8.5.2 — **correção pós-Épico 8.6**: codebases diferentes NÃO namespaceiam/prefixam o ID da function automaticamente; o ID final é literalmente o nome do identificador exportado em `index.ts`, e precisa ser único entre *todos* os codebases do projeto, não só dentro do próprio. Um primeiro deploy real com `export const api` em `orders` e `payments` falhou com `More than one codebase claims functions/api`, algo que o Emulator Suite nunca detecta): `ordersApi`, `paymentsApi`, `onPedidoStatusChange` (Notifications), sem colisão com a function `api` do codebase `default`.
+   Isso sobe Auth + Firestore + Functions (3 codebases) + Hosting (gateway, Módulo 11) no mesmo Emulator UI (`localhost:4000`), sempre contra o projeto demo `demo-gscandelari-ecommerce-api` — nunca um projeto real.
+3. Convenção de nomes de export por codebase (Task 8.5.2 — **correção pós-Épico 8.6**: codebases diferentes NÃO namespaceiam/prefixam o ID da function automaticamente; o ID final é literalmente o nome do identificador exportado em `index.ts`, e precisa ser único entre *todos* os codebases do projeto, não só dentro do próprio. Um primeiro deploy real com `export const api` em `orders` e `payments` falhou com `More than one codebase claims functions/api`, algo que o Emulator Suite nunca detecta): `ordersApi`, `paymentsApi`, `onPedidoStatusChange` (Notifications).
 4. Cada serviço tem sua própria suíte de testes, lint e build, todos verdes (mesmo padrão do `ci-services.yml`):
    ```bash
    cd services/orders && npm run lint && npm run build && npm run test:coverage:emulator
@@ -470,7 +482,9 @@ Fase 3 introduz o primeiro segredo do serviço Notifications: a chave de API do 
 firebase functions:secrets:set RESEND_API_KEY
 # cole a chave de teste/sandbox (re_...) quando solicitado — nunca fica em texto no shell/histórico
 ```
-Referenciado na definição da Cloud Function `onPedidoStatusChange` (opção `secrets`, 2ª geração) — mesmo mecanismo documentado em [Variáveis de ambiente e segredos](#variáveis-de-ambiente-e-segredos). Este segredo é configurado independentemente dos segredos já existentes de Payments (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`) e nunca precisa ser acessível por Orders ou Payments (princípio de menor privilégio, Task 9.1.4). Só é necessário configurá-lo de verdade (local ou produção) quando o corte de produção real da Fase 3 for executado — hoje, os testes automatizados usam exclusivamente o mock do SDK do Resend.
+Referenciado na definição da Cloud Function `onPedidoStatusChange` (opção `secrets`, 2ª geração) — mesmo mecanismo documentado em [Variáveis de ambiente e segredos](#variáveis-de-ambiente-e-segredos). Este segredo é configurado independentemente dos segredos já existentes de Payments (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`) e nunca precisa ser acessível por Orders ou Payments (princípio de menor privilégio, Task 9.1.4). Já configurado em produção real desde o Épico 8.6 — os testes automatizados continuam usando exclusivamente o mock do SDK do Resend, nunca o valor real.
+
+> **Nota (Épico 8.6):** o SDK do Resend não lança exceção em erros de nível de API (`emails.send()` devolve `{ data: null, error }`) — o código de `onPedidoStatusChange.ts` checa esse campo explicitamente e loga via `console.error` quando presente, sem propagar (best-effort, RN19). Sem essa checagem, uma rejeição da API (ex.: sandbox recusando o destinatário) passaria batido, sem nenhum log — foi exatamente o que aconteceu no smoke test real do corte de produção, só corrigido depois de inspecionar os logs de produção com atenção.
 
 ### Como testar o fluxo de notificação por e-mail manualmente
 
@@ -483,17 +497,17 @@ Pré-requisito: `RESEND_API_KEY` real (modo sandbox) configurada em `services/no
 5. Repita cancelando um pedido em `pendente` para validar o e-mail de cancelamento.
 6. Confirme a cláusula best-effort de RN19: force uma falha (ex.: `RESEND_API_KEY` inválida) e confirme, pelo Firestore Emulator UI, que o pedido permanece `confirmado`/`cancelado` normalmente — a falha de e-mail nunca reverte ou bloqueia a transição de status já efetivada por Orders.
 
-### Corte de produção — só como última etapa deliberada
+### Corte de produção — como foi executado (Épico 8.6, concluído)
 
-A Fase 3 **nunca** decomissiona o monólito como parte do trabalho normal de implementação. A sequência completa está detalhada no Épico 8.6 do `BACKLOG.md`; resumo:
+A Fase 3 **nunca decomissionou o monólito como parte do trabalho normal de implementação** — só depois de todo o resto validado, com aprovação explícita do usuário a cada etapa sensível. Sequência real executada (detalhada no Épico 8.6 do `BACKLOG.md`):
 
 1. Todo o trabalho aconteceu isolado em `feat/fase-3-microservicos`, validado 100% localmente (Emulator Suite multi-codebase + suíte de testes por serviço) antes de qualquer deploy real.
-2. PR revisado e mesclado em `main` (PR #1) só depois da suíte completa verde (Módulo 12) — o merge em si **não** deployou nada (deploy continua manual via `workflow_dispatch`, decisão herdada das Fases 1/2, Task 4.5.1). Esta etapa já está concluída.
-3. Deploy real dos 3 novos codebases + Hosting com `--only` explícito (`firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`) — **nunca** toca o codebase `default`; a function `api` da Fase 1+2 continua servindo tráfego real ininterruptamente durante e depois deste deploy.
-4. Smoke test completo em produção real pelo **novo** caminho, incluindo a migração manual da URL do webhook no Dashboard do Stripe (modo teste) para a nova URL pública de Payments.
-5. **Somente** depois do smoke test validado, o codebase `default` é removido de `firebase.json` e a function `api` é explicitamente deletada (`firebase functions:delete api`) — decomissionamento deliberado, nunca automático.
+2. PR revisado e mesclado em `main` (PR #1) só depois da suíte completa verde (Módulo 12) — o merge em si **não** deployou nada. Deploy real ficou deliberadamente pendente por um bom tempo depois do merge, até decisão explícita do usuário de promover o projeto.
+3. Deploy real dos 3 novos codebases + Hosting com `--only` explícito (`firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`) — nunca tocou o codebase `default` durante o deploy; a function `api` da Fase 1+2 continuou servindo tráfego real ininterruptamente até a etapa 5. Descobriu e corrigiu 3 bugs reais de deploy nunca pegos pelo Emulator Suite/testes (ver [Bugs reais encontrados no corte de produção da Fase 3](#deploy) acima).
+4. Smoke test completo em produção real pelo **novo** caminho — pedido criado → PaymentIntent real via chamada interna Orders→Payments → pago com cartão de teste → migração manual da URL do webhook no Dashboard/API do Stripe (modo teste) para a nova URL pública de Payments → webhook confirmou o pedido via chamada interna Payments→Orders → e-mail via Resend confirmado no destinatário real (achou e corrigiu o 4º bug real, no SDK do Resend). Dados de teste removidos depois.
+5. **Só depois** do smoke test validado e de uma confirmação explícita e fresca do usuário, o codebase `default` foi removido de `firebase.json` e a function `api` explicitamente deletada (`firebase functions:delete api`) — decomissionamento deliberado, nunca automático. `.../api/health` responde 404 desde então.
 
-Nenhuma das etapas de produção real acima (passos 3-5) é disparada automaticamente por CI. O novo workflow de CI desta fase (`.github/workflows/ci-services.yml`, ver [CI/CD](#cicd)) faz **apenas** lint/build/test dos 3 novos serviços — não existe (propositalmente) nenhum workflow de deploy para eles nesta rodada. Um workflow de deploy só será criado quando o Épico 8.6 for de fato executado, e mesmo assim como gatilho manual (`workflow_dispatch`) sujeito a aprovação explícita do usuário antes de qualquer disparo real, nunca automático.
+Nenhuma das etapas de produção real acima foi disparada automaticamente por CI — todas via CLI local ou `workflow_dispatch`, sempre com aprovação humana explícita antes de qualquer ação irreversível.
 
 ## Front-end de testes (Fase 4) — `web/`
 
