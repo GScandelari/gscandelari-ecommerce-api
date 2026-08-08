@@ -6,7 +6,8 @@ O domínio é um **Sistema de Pedidos & Pagamentos (E-commerce Core)**, único, 
 - **Fase 1 (concluída, deployada):** API core — Produtos, Pedidos, Clientes, sem gateway de pagamento real.
 - **Fase 2 (concluída, deployada):** integração de pagamento real (Stripe, sempre em modo sandbox/teste) via PaymentIntent + webhook.
 - **Fase 3 (concluída, código em `main`, deploy real ainda não executado):** quebra em microsserviços (Orders, Payments, Notifications), cada um um codebase de Cloud Functions deployável independentemente, com API Gateway via Firebase Hosting rewrites.
-- **Fase 4 (esta spec):** front-end de testes (React + Vite) para clientes e administradores, rodando contra o Emulator Suite (monólito da Fase 1+2).
+- **Fase 4 (concluída):** front-end de testes (React + Vite) para clientes e administradores, rodando contra o Emulator Suite (monólito da Fase 1+2).
+- **Fase 5 (esta spec):** cancelamento pós-pagamento e reembolso — emenda às regras de status/cancelamento da Fase 1 (RN05/RN06/RN07) e de pagamento da Fase 2, com o front-end da Fase 4 refletindo o novo fluxo.
 
 ---
 
@@ -143,3 +144,37 @@ Decisão técnica (não é regra de negócio): o front-end **não acessa Firesto
 - `.env.example` do front-end: config do Firebase Web App (placeholders, funcionam com o Emulator sem valores reais) e chave publicável do Stripe (`pk_test_...`, não é segredo, mas fica como placeholder mesmo assim).
 - README deve documentar como rodar o front-end junto com o Emulator Suite (dois processos: `firebase emulators:start` + `npm run dev` em `web/`), incluindo criar um usuário admin de teste via `functions/scripts/setAdminClaim.js`.
 - CI leve (lint + build + test) para `web/`, mesmo padrão de `ci-services.yml`. Sem deploy — a aplicação não é publicada nesta fase (uso local/experimentação, conforme decisão do usuário).
+
+---
+
+## Fase 5 (Cancelamento pós-pagamento e Reembolso)
+
+### 1. Visão Geral & Escopo
+
+Emenda às regras de status/cancelamento de pedido (Fase 1, RN05/RN06/RN07) e de pagamento (Fase 2): hoje o Cliente só pode cancelar um pedido em `pendente`, e nenhum cancelamento — nem do Cliente, nem do Admin — dispara qualquer estorno real no Stripe (a Fase 1 documenta isso deliberadamente como fora de escopo, RN07a). Esta fase resolve a lacuna, encontrada durante testes manuais de ponta a ponta da Fase 4 (Emulator Suite + Stripe CLI): o cliente pode querer cancelar um pedido já pago, e quando isso acontece o dinheiro precisa ser devolvido — mas de forma **deliberadamente manual e caso a caso pelo Admin**, nunca automática, e nunca antes de confirmar se o produto físico precisa ou não retornar primeiro.
+
+Esta fase afeta código já em produção real (`functions/`, Fases 1+2) e a área de Cliente/Admin do front-end de testes (`web/`, Fase 4). Não afeta a Fase 3 (`services/`), que continua sem deploy real por decisão já registrada do usuário — a emenda é replicada lá apenas por consistência de código-fonte (mesma duplicação deliberada já usada para `webhooks.routes.ts`), sem qualquer ação de deploy.
+
+Decisão técnica (não é regra de negócio): assim como a criação de PaymentIntent (RN10), a chamada de estorno ao Stripe é uma chamada de rede — nunca pode acontecer dentro de uma `db.runTransaction` do Firestore; roda depois, com compensação manual (reflexo em `paymentStatus`) se falhar.
+
+### 2. Regras de Negócio & Casos de Teste (para o agente qa-negocio)
+- **RN28**: O Cliente dono do pedido pode cancelá-lo enquanto o status for `pendente` **ou** `confirmado` — nos dois casos o pedido vai imediatamente para `cancelado` (estende RN06, que hoje cobre só `pendente`). Estoque é restaurado nos dois casos (mesma lógica de RN07a para `pendente`; para `confirmado`, estoque também é restaurado agora, já que o produto ainda não foi despachado).
+- **RN29**: Cancelar um pedido em `enviado` — seja a pedido do Cliente dono, seja por ação direta do Admin — **não** vai direto para `cancelado`. Vai para um novo status intermediário, `aguardando_devolucao`, refletindo que o produto ainda está fisicamente com o cliente. Isso se sobrepõe à parte de RN07 que hoje permite ao Admin cancelar diretamente a partir de `enviado`.
+- **RN30**: Somente o Admin pode transicionar `aguardando_devolucao → cancelado`, confirmando que o produto retornou fisicamente. Ao confirmar, o estoque dos itens é restaurado (mesma lógica de RN07a).
+- **RN31**: Nenhuma transição para `cancelado` (por RN28, RN29+RN30, ou o cancelamento já existente do Admin a partir de `pendente`) dispara reembolso automático. Se o pedido cancelado tinha `paymentStatus: "pago"` no momento do cancelamento (ou seja, o cancelamento partiu de `confirmado`, `enviado` ou `aguardando_devolucao` — nunca de `pendente`, onde ainda não há cobrança confirmada), `paymentStatus` passa para o novo valor `"estorno_pendente"`, sinalizando que um reembolso é devido mas ainda não foi processado.
+- **RN32**: O Admin tem uma ação dedicada "Solicitar reembolso" (`PATCH /pedidos/:id/reembolsar` ou equivalente), disponível apenas quando `paymentStatus === "estorno_pendente"`, que chama a API de Refunds do Stripe (`stripe.refunds.create`) pelo valor total do pedido (`pedido.total` — sem reembolso parcial nesta fase) e atualiza `paymentStatus` para `"reembolsado"` em caso de sucesso. Em caso de falha na chamada ao Stripe, `paymentStatus` permanece `"estorno_pendente"` (permite nova tentativa) e a resposta é um erro de gateway (mesmo padrão de RN10/`PaymentGatewayError`, 502) — esta ação é independente de qualquer transição de `status` do pedido (o pedido já está `cancelado`; só o `paymentStatus` muda).
+- **RN33**: `PedidoStatus` ganha o valor `aguardando_devolucao` (entre `enviado` e `cancelado` no fluxo); `PaymentStatus` ganha os valores `estorno_pendente` e `reembolsado`. A máquina de estados de RN05 é atualizada: `enviado → [entregue, aguardando_devolucao]` (troca `cancelado` por `aguardando_devolucao` como destino de cancelamento a partir daqui); `aguardando_devolucao → [cancelado]` (somente Admin, RN30).
+
+**Casos de teste locais requeridos:** Jest + Supertest com o SDK do Stripe mockado (mesmo padrão da Fase 2, `mockStripe`/`refunds.create` mockado), cobrindo RN28-RN33 sem regressão nas RN01-RN15 já existentes (em especial: a máquina de estados RN05 muda, então os testes existentes de transição a partir de `enviado` precisam ser revistos). Meta: manter cobertura ≥70%.
+
+### 3. Decomposição de Tarefas (para o agente arquiteto-tarefas)
+- **Módulo 18: Máquina de estados e modelo de dados** — novo valor `aguardando_devolucao` em `PedidoStatus`, novos valores `estorno_pendente`/`reembolsado` em `PaymentStatus`, atualização da tabela de transições válidas (RN33), sem regressão nos testes existentes de RN05.
+- **Módulo 19: Cancelamento estendido** — `PATCH /pedidos/:id/cancelar` (Cliente) passa a aceitar `confirmado` além de `pendente` (RN28) e a rotear para `aguardando_devolucao` quando `enviado`; `PATCH /pedidos/:id/status` (Admin) idem para o caso `enviado → aguardando_devolucao` e `aguardando_devolucao → cancelado` (RN29/RN30); lógica de marcar `paymentStatus: "estorno_pendente"` quando aplicável (RN31).
+- **Módulo 20: Endpoint de reembolso** — novo endpoint admin-only para solicitar reembolso via Stripe (RN32), cliente Stripe já existente (`stripeClient.ts`) reaproveitado, chamada de rede fora de qualquer transação Firestore.
+- **Módulo 21: Front-end (`web/`)** — Área do Cliente: botão de cancelar passa a aparecer também em `confirmado`/`enviado` (com aviso de que, a partir de `enviado`, o cancelamento aguarda confirmação de devolução); Área do Admin: novo status `aguardando_devolucao` no seletor de transições, novo botão "Solicitar reembolso" quando `paymentStatus === "estorno_pendente"`.
+- **Módulo 22: Testes e regressão** — cobertura de RN28-RN33 em `functions/` (e replicada em `services/orders`+`services/payments`, Fase 3, sem deploy), testes Vitest/RTL novos para os componentes alterados do Módulo 21, confirmação de zero regressão nas RNs já existentes.
+
+### 4. Requisitos de DevOps & Doc (para o agente devops-tech-writer)
+- Nenhum segredo novo (reaproveita `STRIPE_SECRET_KEY` já configurado).
+- README (raiz): atualizar a documentação da máquina de estados e do fluxo de cancelamento/reembolso; deixar claro que o reembolso é sempre uma ação manual e deliberada do Admin, nunca automática.
+- Sem mudança na estratégia de deploy (`workflow_dispatch`, manual) — esta fase, assim como as demais mudanças em `functions/` desde a Fase 2, só é promovida a produção real mediante decisão explícita do usuário.
