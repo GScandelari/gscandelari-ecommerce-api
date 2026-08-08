@@ -52,7 +52,10 @@ export const onPedidoStatusChange = onDocumentUpdated(
       // batido, sem nenhum log - invisivel tanto pro emulador (SDK
       // mockado nos testes) quanto pra qualquer teste automatizado.
       if (error) {
-        console.error("Falha ao enviar notificacao de pedido (best-effort, nao bloqueia nada):", error);
+        console.error(
+          "Falha ao enviar notificacao de pedido (best-effort, nao bloqueia nada):",
+          error,
+        );
       }
     } catch (err) {
       console.error("Falha ao enviar notificacao de pedido (best-effort, nao bloqueia nada):", err);
