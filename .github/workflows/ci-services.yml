@@ -8,17 +8,11 @@ name: CI - Serviços (Fase 3)
 # continuam cuidando exclusivamente de `functions/` (Fase 1+2), hoje
 # deployado e servindo tráfego real em produção.
 #
-# IMPORTANTE — estado esperado nesta fase: os 3 serviços ainda são só
-# scaffold (package.json/tsconfig/jest.config) + suíte de testes TDD dos
-# Módulos 9-12 do BACKLOG.md, propositalmente "vermelha" (`src/` de cada
-# serviço ainda está vazio; nenhum `eslint.config` por serviço existe
-# ainda — Task 8.1.2, Módulo 8). Este workflow roda mesmo assim, de
-# propósito: ele existe para ficar verde incrementalmente conforme cada
-# módulo (8 a 12) for implementado nesta mesma branch
-# (feat/fase-3-microservicos). Ele NÃO é (ainda) um check obrigatório de
-# nenhuma branch protection, e sua falha não bloqueia `ci.yml`/`deploy.yml`
-# nem a branch `main` (que continua protegida só pelo check de `ci.yml`,
-# ver CONTRIBUTING.md).
+# Estado atual: os 3 serviços estão implementados e mesclados em `main`
+# (PR #1) — lint/build/test verdes nos 3 codebases. Ele NÃO é (ainda) um
+# check obrigatório de nenhuma branch protection, e sua falha não bloqueia
+# `ci.yml`/`deploy.yml` nem a branch `main` (que continua protegida só pelo
+# check de `ci.yml`, ver CONTRIBUTING.md).
 #
 # NENHUM DEPLOY é feito por este workflow. O deploy real dos novos
 # codebases (Épico 8.6 do BACKLOG.md — corte de produção) é a última etapa
@@ -30,12 +24,16 @@ name: CI - Serviços (Fase 3)
 
 on:
   push:
-    branches: [feat/fase-3-microservicos]
+    # `feat/fase-3-microservicos` foi mesclada e deletada (PR #1) - `main`
+    # e o unico branch de push relevante desde entao. Sem isso, mudancas em
+    # services/** direto em `main` (ex.: fix(webhooks) pos-Fase 4) nunca
+    # disparavam este workflow.
+    branches: [main]
     paths:
       - "services/**"
       - ".github/workflows/ci-services.yml"
   pull_request:
-    branches: [main, feat/fase-3-microservicos]
+    branches: [main]
     paths:
       - "services/**"
       - ".github/workflows/ci-services.yml"
