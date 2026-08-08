@@ -792,3 +792,229 @@ Os Requisitos de DevOps & Doc da Fase 4 (seção 4 da spec): `.env.example` do f
 Nenhum bloqueio de negócio identificado nesta rodada. Uma nuance foi identificada e resolvida como decisão técnica, não como bloqueio: RN23 exige apenas que a aplicação "exercite RN10 de ponta a ponta" (criação da PaymentIntent e confirmação do pagamento via Stripe Elements) — a transição do **status** do pedido para `confirmado` é RN12 (Fase 2), que depende da entrega do webhook, algo que só acontece localmente com o Stripe CLI configurado (`stripe listen`, fora do que a spec da Fase 4 pede explicitamente). Isso não é uma lacuna de regra de negócio: a spec não promete o fechamento desse ciclo automaticamente em ambiente local, e o comportamento (pedido fica `pendente` até ação manual do Admin, RN25, se o Stripe CLI não estiver rodando) é consistente com as regras já existentes — apenas documentado explicitamente (Decisão técnica 4, Task 15.2.5, Task 17.4.2) para não ser confundido com um defeito da implementação.
 
 Demais decisões (estrutura de pastas de `web/src/`, forma de tratamento de erro do cliente HTTP, mecanismo de exposição do claim de admin, integração exata com Stripe Elements, persistência do carrinho) são detalhes técnicos de implementação, delegados pela própria spec ao arquiteto-tarefas, e foram resolvidos e documentados na seção "Decisões técnicas registradas nesta rodada" acima.
+
+---
+
+## Backlog: gscandelari-ecommerce-api — Fase 5 (Cancelamento pós-pagamento e Reembolso)
+
+> Gerado a partir de SPEC.md, seção "Fase 5". Fragmenta os Módulos 18-22 (seção 3 da Fase 5) em épicos e tasks técnicas pequenas, testáveis de forma independente. Nenhuma regra de negócio (RN28-RN33) foi reaberta ou reinterpretada além do necessário para viabilizar a implementação — esta fase é uma **emenda** a RN05/RN06/RN07/RN07a (Fase 1) e ao modelo de pagamento da Fase 2, então todo código já existente citado abaixo (`pedidos.statusMachine.ts`, `pedidosService.ts`, `pedidos.routes.ts`, `stripeClient.ts`, `errors/index.ts`) é **estendido no lugar**, não recriado. Esta fase toca código já em produção real (`functions/`) — assim como a Fase 2, qualquer promoção a produção depende de decisão explícita do usuário e segue a mesma estratégia de deploy manual (`workflow_dispatch`, Task 4.5.1). Os serviços da Fase 3 (`services/orders`, `services/payments`) recebem a mesma emenda por consistência de código-fonte (Épico 22.7), mas continuam sem deploy real.
+
+### Decisões técnicas registradas nesta rodada (não são bloqueios, não requerem o clarificador)
+
+1. **Nome, verbo HTTP e autorização do endpoint de reembolso (RN32).** `PATCH /pedidos/:id/reembolsar`, montado em `functions/src/routes/pedidos.routes.ts` ao lado das rotas de `:id/status` e `:id/cancelar` (mesmo arquivo, mesmo recurso `/pedidos`, evita criar um sub-router só para isso). Verbo `PATCH` por consistência com os outros dois endpoints de transição de estado do pedido já existentes (`:id/status`, `:id/cancelar`) — o reembolso é conceitualmente a mesma categoria de operação ("atualiza um sub-estado do pedido"), mesmo não sendo uma transição de `status` (RN32 é explícito: é o `paymentStatus` que muda, o `status` do pedido já está `cancelado` e não se altera). Protegido por `requireAdmin` (middleware já existente desde a Fase 1, Task 2.2.2) — admin-only, sem exceção, conforme RN32. A chamada ao Stripe usa `stripe.refunds.create({ payment_intent: pedido.paymentIntentId, amount: Math.round(pedido.total * 100) })` — `amount` explícito (não omitido) para manter o mesmo padrão já usado em `criarPaymentIntent` (Task 5.3.1, Fase 2), que sempre calcula o valor em centavos a partir de `pedido.total` em vez de depender do valor implícito já capturado no PaymentIntent; isso também deixa o comportamento determinístico e testável com o SDK mockado.
+2. **Um único ponto de checagem de RN31, reaproveitado nos 2 pontos de entrada que efetivamente escrevem `status: "cancelado"`.** Revisando o código existente (`pedidosService.ts`): a transição `aguardando_devolucao → cancelado` (RN30) **não** é um terceiro ponto de entrada distinto — ela é disparada pelo Admin através do mesmo endpoint genérico `PATCH /pedidos/:id/status`, ou seja, pela mesma função `alterarStatusAdmin` que já trata qualquer transição para `cancelado` disparada pelo Admin (inclusive a partir de `pendente`/`confirmado`, herdadas da Fase 1). Os pontos de entrada reais são portanto só 2: `cancelarPedidoCliente` (Cliente) e `alterarStatusAdmin` (Admin, qualquer origem). Decisão: criar uma função pura `determinarPaymentStatusAoCancelar(paymentStatusAtual: PaymentStatus): PaymentStatus` em `pedidosService.ts` — retorna `"estorno_pendente"` se `paymentStatusAtual === "pago"`, senão retorna o valor recebido inalterado — chamada por ambas as funções sempre que a transição efetivada for para `"cancelado"` (nunca na transição `enviado → aguardando_devolucao`, que não é um cancelamento efetivo ainda). Evita duplicar a regra "pago → estorno_pendente" em 2 lugares com o risco de um deles divergir no futuro.
+3. **Restauração de estoque nas novas transições (RN28, RN30) — `restaurarEstoque` já é reutilizável sem alteração de assinatura.** A função `restaurarEstoque(tx, itens)` (Fase 2, interna a `pedidosService.ts`) já é agnóstica de onde é chamada — recebe só a transação e os itens, sem saber a origem/destino da transição. Os call sites é que mudam:
+   - `cancelarPedidoCliente`: hoje só chama `restaurarEstoque` quando `status === "pendente"` (única origem possível). Passa a chamar também quando `status === "confirmado"` (RN28) — nenhuma mudança na função em si.
+   - `alterarStatusAdmin`: hoje chama `restaurarEstoque` só quando `novoStatus === "cancelado" && pedido.status === "pendente"` (RN07a, Fase 1, inalterado). Passa a chamar **também** quando `novoStatus === "cancelado" && pedido.status === "aguardando_devolucao"` (RN30) — a condição vira uma disjunção (`pendente` OU `aguardando_devolucao`), nunca `confirmado`.
+   - **Nuance explícita, não é lacuna:** isso preserva deliberadamente uma assimetria entre Cliente e Admin para a transição `confirmado → cancelado`: quando o **Cliente** cancela um pedido `confirmado`, o estoque é restaurado (RN28, novo); quando o **Admin** cancela um pedido `confirmado` via `PATCH /pedidos/:id/status`, o estoque **não** é restaurado (RN07a, Fase 1, textualmente inalterado por esta spec). RN28 fala exclusivamente do Cliente ("O Cliente dono do pedido pode cancelá-lo..."); RN30 (a única extensão de RN07a mencionada nesta fase) fala exclusivamente de `aguardando_devolucao → cancelado`. Como a spec não menciona alterar o comportamento do Admin para `confirmado → cancelado`, o comportamento herdado da Fase 1 (ajuste manual, fora de escopo) permanece — mesmo padrão de decisão já usado na Fase 1 (RN07a) para justificar a assimetria cliente/admin. Documentado aqui para deixar explícito que não foi um esquecimento; ver também Tasks 19.4.1/22.4.4.
+4. **Erro HTTP quando o reembolso é solicitado fora de `paymentStatus === "estorno_pendente"`.** `ValidationError` (400), pelo mesmo padrão já usado em `cancelarPedidoCliente` para "só é possível cancelar pedidos com status 'pendente'" — é uma precondição de estado de negócio violada por um payload/ação de outra forma bem formada, não um conflito de concorrência (que usaria `ConflictError`/409). Mantém consistência com o vocabulário de erro já estabelecido nas Fases 1/2 em vez de introduzir uma nova semântica de status HTTP só para este endpoint.
+5. **Sequenciamento entre os Módulos 18-22.** Detalhado na seção "Ordem sugerida de execução" abaixo. Resumo: Módulo 18 é pré-requisito de tudo (define os novos valores de enum e a nova transição válida que os Módulos 19/20 consomem); Módulos 19 e 20 podem ser desenvolvidos em paralelo entre si (mexem em funções/rotas diferentes de `pedidosService.ts`/`pedidos.routes.ts`, sem overlap de código); Módulo 21 depende dos contratos finais de 19/20; Módulo 22 é incremental (TDD) em paralelo a cada módulo, com a replicação para `services/` (Épico 22.7) deliberadamente por último, só depois do comportamento em `functions/` estar validado.
+6. **Replicação em `services/orders`/`services/payments` (Fase 3) — só código-fonte, sem deploy, e a fronteira do reembolso precisa de um endpoint interno novo.** A extensão do modelo/máquina de estados e da lógica de cancelamento (RN28-RN31, RN33) é duplicação direta 1:1 em `services/orders` — a mesma duplicação deliberada já documentada na Decisão técnica 4 da Fase 3 (nenhum dado sai da fronteira de Orders, `restaurarEstoque`/`cancelarPedidoCliente`/`alterarStatusAdmin` em `services/orders` não dependem do Stripe). O endpoint de reembolso (RN32) é diferente: na Fase 3, todo código que fala com o Stripe foi extraído para `services/payments` (Decisão técnica 3 da Fase 3) — `services/orders` não tem `stripeClient.ts` nem `stripeService.ts` e não deve ganhá-los agora só para o reembolso, sob pena de recriar exatamente o acoplamento que a Fase 3 eliminou. Decisão: replicar RN32 seguindo o **mesmo padrão já usado para a criação de PaymentIntent** (Módulo 9 da Fase 3) — um novo endpoint interno `POST /internal/refunds` em `services/payments` (protegido por `verifyInternalToken`, já existente), e `services/orders` chama esse endpoint via `payments.internalClient.ts` (já existente, Task 9.2.2 da Fase 3) em vez de chamar o Stripe diretamente. Isso é replicação de **comportamento equivalente**, não um "copy-paste" literal do código de `functions/` — reflete a mesma adaptação arquitetural documentada na Fase 3 para RN10. Nenhuma task deste backlog (Épico 22.7) executa `firebase deploy`, `gcloud`, ou qualquer comando que afete o projeto Firebase real — só edição de arquivos-fonte e testes/build locais.
+
+### Ordem sugerida de execução (visão macro)
+
+1. **Módulo 18** (Máquina de estados e modelo de dados) — pré-requisito de tudo; define os novos valores de `PedidoStatus`/`PaymentStatus` e a nova transição válida que os demais módulos consomem. Épicos 18.1 e 18.2 podem ser feitos no mesmo PR, mas 18.2 (máquina de estados) depende dos tipos definidos em 18.1.
+2. **Módulo 19** (Cancelamento estendido) e **Módulo 20** (Endpoint de reembolso) — podem rodar **em paralelo** entre si (mexem em funções/rotas diferentes de `pedidosService.ts`/`pedidos.routes.ts`, sem overlap de código), mas ambos dependem do Módulo 18 completo. Dentro do Módulo 19: Épico 19.1 (helper RN31) antes de 19.3/19.4 (que o consomem); Épico 19.2 é só uma confirmação, pode ser feito a qualquer momento; 19.3 (Cliente) e 19.4 (Admin) podem rodar em paralelo entre si.
+3. **Módulo 21** (Front-end) — depende dos contratos finais dos Módulos 19 e 20 (nomes de campo/endpoint não podem mudar depois). O Épico 21.1 (tipos/API client) pode começar assim que o Módulo 18 fechar, adiantando trabalho.
+4. **Módulo 22** (Testes e regressão) — incremental (TDD) em paralelo a cada épico dos Módulos 18-21 conforme cada um fecha; a replicação em `services/orders`+`services/payments` (Épico 22.7) é deliberadamente a **última** fatia, só depois do comportamento em `functions/` estar validado e estável (evita retrabalho de replicar algo que ainda pode mudar); o fechamento de cobertura/rastreabilidade final (Épico 22.6) é sempre por último dentro de `functions/`.
+
+---
+
+### Módulo 18: Máquina de estados e modelo de dados
+
+> Implementa RN33 (base estrutural para todos os demais módulos). Tabela de rastreabilidade ao final desta seção.
+
+- **Épico 18.1: Modelo de dados**
+  - [ ] Task 18.1.1: Estender `PedidoStatus` em `functions/src/services/pedidos.statusMachine.ts` com o valor `"aguardando_devolucao"`, e `PaymentStatus` em `functions/src/models/pedido.ts` com os valores `"estorno_pendente"` e `"reembolsado"` — implementa a base de **RN33** (critério de aceite: `npm run build` compila sem erro; `PedidoStatus` passa a ter 6 valores, `PaymentStatus` passa a ter 5 valores, ambos exportados sem quebrar nenhum import existente)
+  - [ ] Task 18.1.2: Atualizar `alterarStatusSchema` (`functions/src/schemas/pedido.schema.ts`) para incluir `"aguardando_devolucao"` no `z.enum([...])` — implementa a base de **RN33** (critério de aceite: `PATCH /pedidos/:id/status` com `{ status: "aguardando_devolucao" }` passa da validação Zod; um valor fora do enum continua rejeitado com 400)
+  Dependências: nenhuma (ponto de partida da Fase 5).
+
+- **Épico 18.2: Máquina de estados — implementa RN33**
+  - [ ] Task 18.2.1: Atualizar `VALID_TRANSITIONS` em `pedidos.statusMachine.ts`: `enviado: ["entregue", "aguardando_devolucao"]` (remove `"cancelado"` como destino direto a partir de `enviado`); nova chave `aguardando_devolucao: ["cancelado"]` — implementa **RN33** (critério de aceite: `isValidTransition("enviado", "cancelado")` passa a retornar `false`; `isValidTransition("enviado", "aguardando_devolucao")` retorna `true`; `isValidTransition("aguardando_devolucao", "cancelado")` retorna `true`; `isValidTransition("aguardando_devolucao", "entregue")` e qualquer outro destino a partir de `aguardando_devolucao` retornam `false`; as demais transições herdadas — `pendente→confirmado`, `pendente→cancelado`, `confirmado→enviado`, `confirmado→cancelado`, `enviado→entregue` — permanecem exatamente como estavam)
+  - [ ] Task 18.2.2: Confirmar (inspeção + teste unitário isolado da função pura, sem subir o Emulator) que a mudança de contrato de `enviado→cancelado` é a **única** alteração estrutural de RN05 nesta fase — nenhuma outra transição herdada da Fase 1 muda (critério de aceite: tabela de transições completa, antes/depois, documentada no teste; teste explicitamente nomeado para deixar claro que a rejeição de `enviado→cancelado` é uma mudança de contrato intencional, não uma regressão)
+  Dependências: Épico 18.1.
+
+#### Rastreabilidade RN33 → Tasks (Módulo 18)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN33 | Novo valor `aguardando_devolucao` em `PedidoStatus`; novos valores `estorno_pendente`/`reembolsado` em `PaymentStatus`; máquina de estados atualizada (`enviado→[entregue,aguardando_devolucao]`, `aguardando_devolucao→[cancelado]`) | 18.1.1, 18.1.2, 18.2.1, 18.2.2 |
+
+---
+
+### Módulo 19: Cancelamento estendido
+
+> Implementa RN28, RN29, RN30, RN31. Tabela de rastreabilidade ao final desta seção.
+
+- **Épico 19.1: Helper compartilhado de `paymentStatus` ao cancelar — implementa RN31**
+  - [ ] Task 19.1.1: Criar `determinarPaymentStatusAoCancelar(paymentStatusAtual: PaymentStatus): PaymentStatus` em `pedidosService.ts` (função pura, sem I/O) — reflete a Decisão técnica 2 (critério de aceite: retorna `"estorno_pendente"` quando `paymentStatusAtual === "pago"`; retorna o valor recebido inalterado para `"aguardando_pagamento"`, `"falhou"`, `"estorno_pendente"` ou `"reembolsado"`; testável isoladamente, sem transação/Firestore)
+  Dependências: Épico 18.1 (tipo `PaymentStatus` já estendido).
+
+- **Épico 19.2: Confirmação de reuso de `restaurarEstoque`**
+  - [ ] Task 19.2.1: Confirmar por inspeção que `restaurarEstoque(tx, itens)` não precisa de nenhuma alteração de assinatura ou de corpo para os novos call sites das Tasks 19.3.1 e 19.4.1 — reflete a Decisão técnica 3 (critério de aceite: diff do PR não altera `restaurarEstoque` em si, apenas as condições nos call sites em `cancelarPedidoCliente`/`alterarStatusAdmin`)
+  Dependências: nenhuma (só uma confirmação, pode ser feita a qualquer momento).
+
+- **Épico 19.3: `cancelarPedidoCliente` (Cliente) — implementa RN28, RN29**
+  - [ ] Task 19.3.1: Estender `cancelarPedidoCliente` para aceitar `status === "confirmado"` como origem de cancelamento direto, além de `"pendente"` já existente — em ambos os casos: `restaurarEstoque(tx, pedido.itens)`, `status: "cancelado"`, `paymentStatus: determinarPaymentStatusAoCancelar(pedido.paymentStatus)` (Task 19.1.1) — implementa **RN28** (critério de aceite: cliente dono cancela pedido `confirmado` → 200, `status` vira `cancelado`, estoque restaurado, validável por leitura direta no Firestore Emulator; se `paymentStatus` era `"pago"`, passa a `"estorno_pendente"`; se era `"aguardando_pagamento"`, permanece inalterado)
+  - [ ] Task 19.3.2: Estender `cancelarPedidoCliente` para rotear `status === "enviado"` para `"aguardando_devolucao"` em vez de rejeitar — sem restaurar estoque, sem alterar `paymentStatus` (o pedido ainda não está `cancelado`) — implementa **RN29** (critério de aceite: cliente dono "cancela" pedido `enviado` → 200, `status` vira `aguardando_devolucao`; estoque do produto inalterado; `paymentStatus` inalterado; validável por leitura direta no Firestore)
+  - [ ] Task 19.3.3: Confirmar/ajustar a rejeição (`ValidationError`, 400) para `status` fora de `["pendente", "confirmado", "enviado"]` — ou seja, tentativas de cancelamento pelo Cliente a partir de `aguardando_devolucao`, `entregue` ou `cancelado` continuam bloqueadas (critério de aceite: os 3 cenários — `aguardando_devolucao`, `entregue`, `cancelado` — retornam 400, sem nenhuma escrita no Firestore)
+  Dependências: Épicos 18.2, 19.1, 19.2.
+
+- **Épico 19.4: `alterarStatusAdmin` (Admin) — implementa RN29, RN30, RN31, preserva RN07a**
+  - [ ] Task 19.4.1: Estender a condição de restauração de estoque em `alterarStatusAdmin` de `novoStatus === "cancelado" && pedido.status === "pendente"` para `novoStatus === "cancelado" && (pedido.status === "pendente" || pedido.status === "aguardando_devolucao")` — implementa **RN30**, preserva **RN07a** para `confirmado` (Decisão técnica 3) (critério de aceite: admin transiciona `pendente→cancelado` → estoque restaurado, comportamento herdado inalterado; admin transiciona `aguardando_devolucao→cancelado` → estoque restaurado; admin transiciona `confirmado→cancelado` → estoque **não** restaurado, comportamento herdado inalterado — os 3 cenários validados por leitura direta no Firestore)
+  - [ ] Task 19.4.2: Aplicar `determinarPaymentStatusAoCancelar` (Task 19.1.1) sempre que `novoStatus === "cancelado"` em `alterarStatusAdmin`, independente da origem — implementa **RN31** (critério de aceite: admin cancela pedido `confirmado` com `paymentStatus: "pago"` → `paymentStatus` vira `"estorno_pendente"`; admin cancela pedido `pendente` com `paymentStatus: "aguardando_pagamento"` → `paymentStatus` permanece inalterado; admin confirma `aguardando_devolucao→cancelado` com `paymentStatus: "pago"` → vira `"estorno_pendente"`)
+  - [ ] Task 19.4.3: Confirmar (teste, sem código adicional — o comportamento já vem de `isValidTransition`, Task 18.2.1) que `alterarStatusAdmin` aceita `enviado→aguardando_devolucao` sem nenhum efeito colateral de estoque/pagamento — implementa **RN29** para o caso "ação direta do Admin" (critério de aceite: admin transiciona pedido `enviado→aguardando_devolucao` → 200; estoque inalterado; `paymentStatus` inalterado)
+  - [ ] Task 19.4.4: Confirmar (teste) que `alterarStatusAdmin` rejeita `enviado→cancelado` com 400, refletindo a mudança de contrato da Task 18.2.1 — implementa a cláusula de sobreposição de RN29 sobre a parte de RN07 que hoje permitia essa transição direta (critério de aceite: tentativa de `PATCH /pedidos/:id/status` com `{status: "cancelado"}` para um pedido `enviado` retorna 400; nenhuma escrita no Firestore)
+  Dependências: Épicos 18.2, 19.1, 19.2.
+
+- **Épico 19.5: Regressão de contrato das rotas**
+  - [ ] Task 19.5.1: Confirmar que `PATCH /pedidos/:id/cancelar` continua sem exigir corpo de requisição (o destino — `cancelado` ou `aguardando_devolucao` — é inteiramente decidido no backend a partir do `status` atual do pedido, nenhuma escolha exposta ao chamador) e que `PATCH /pedidos/:id/status` aceita `"aguardando_devolucao"` no payload (Task 18.1.2) sem exigir nenhum outro campo novo (critério de aceite: nenhuma mudança de assinatura nas duas rotas em `pedidos.routes.ts` além do que já é herdado do schema/serviço; contrato de resposta — o próprio `Pedido` atualizado, 200 — inalterado)
+  Dependências: Épicos 19.3, 19.4.
+
+#### Rastreabilidade RN28-RN31 → Tasks (Módulo 19)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN28 | Cliente cancela `pendente` ou `confirmado` → `cancelado` imediato, estoque restaurado nos dois casos | 19.3.1 |
+| RN29 | Cancelar a partir de `enviado` (Cliente ou Admin) vai para `aguardando_devolucao`, não direto a `cancelado` | 19.3.2, 19.4.3, 19.4.4, 18.2.1 |
+| RN30 | Só Admin transiciona `aguardando_devolucao→cancelado`; estoque restaurado | 19.4.1 |
+| RN31 | Nenhuma transição a `cancelado` reembolsa automaticamente; se `paymentStatus` era `"pago"`, vira `"estorno_pendente"` | 19.1.1, 19.3.1, 19.4.2 |
+
+---
+
+### Módulo 20: Endpoint de reembolso
+
+> Implementa RN32. Tabela de rastreabilidade ao final desta seção.
+
+- **Épico 20.1: Serviço de reembolso**
+  - [ ] Task 20.1.1: Criar `reembolsarPedido(pedidoId: string): Promise<Pedido>` em `pedidosService.ts`, reaproveitando `getStripeClient()`/`stripeClient.ts` já existente (Fase 2) — fluxo: (a) leitura do pedido; (b) se `pedido.paymentStatus !== "estorno_pendente"`, lança `ValidationError` (Decisão técnica 4), sem chamar o Stripe; (c) **fora** de qualquer `db.runTransaction`, chama `stripe.refunds.create({ payment_intent: pedido.paymentIntentId, amount: Math.round(pedido.total * 100) })` (Decisão técnica 1); (d) em sucesso, `update` não-transacional de `paymentStatus: "reembolsado"` (mesmo padrão não-transacional já usado em `criarPedidoComPagamento`, Task 5.3.3 da Fase 2); (e) em falha, `paymentStatus` permanece `"estorno_pendente"` (nenhuma escrita), relança como `PaymentGatewayError` (502) — implementa **RN32** (critério de aceite: nenhuma chamada ao Stripe ocorre dentro de `db.runTransaction`, verificável por inspeção de código; sucesso mockado → `paymentStatus` vira `"reembolsado"`, `status` do pedido permanece inalterado — RN32 é explícito que é ação independente da máquina de estados; falha mockada → `paymentStatus` permanece `"estorno_pendente"`, permitindo nova tentativa; `pedidoId` inexistente → `NotFoundError`, 404)
+  - [ ] Task 20.1.2: Confirmar que `PaymentGatewayError` (já existente em `errors/index.ts` desde a Fase 2) não precisa de nenhuma alteração para ser reutilizada aqui — mesmo padrão de RN10 (critério de aceite: erro de falha no reembolso segue o mesmo payload padronizado `{ error: { code: "PAYMENT_GATEWAY_ERROR", message } }` já usado pelo erro de falha na criação de PaymentIntent)
+  Dependências: Épico 18.1 (`paymentStatus` estendido).
+
+- **Épico 20.2: Rota `PATCH /pedidos/:id/reembolsar` (admin-only) — Decisão técnica 1**
+  - [ ] Task 20.2.1: Adicionar a rota em `functions/src/routes/pedidos.routes.ts`, protegida por `requireAdmin`, chamando `reembolsarPedido` — implementa **RN32** (critério de aceite: não-admin → 403; admin + `paymentStatus !== "estorno_pendente"` → 400, sem chamada ao Stripe; admin + `paymentStatus === "estorno_pendente"` + Stripe mockado com sucesso → 200 com `paymentStatus: "reembolsado"` no corpo; admin + Stripe mockado falhando → 502, `paymentStatus` no Firestore continua `"estorno_pendente"`; sem token → 401)
+  - [ ] Task 20.2.2: Atualizar `functions/src/openapi.json` (Fase 1, Task 2.7.1) com o novo endpoint `PATCH /pedidos/:id/reembolsar` e os novos valores de `PedidoStatus`/`PaymentStatus` nos schemas já documentados — critério de aceite: `npm run openapi:validate` (`@redocly/cli`) continua em 0 erros; `GET /docs` (Swagger UI) lista o novo endpoint e os novos valores de enum aparecem nos schemas de `Pedido`
+  Dependências: Épico 20.1.
+
+#### Rastreabilidade RN32 → Tasks (Módulo 20)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN32 | Admin solicita reembolso via Stripe quando `paymentStatus === "estorno_pendente"`; sucesso → `"reembolsado"`; falha → mantém `"estorno_pendente"`, 502 | 20.1.1, 20.1.2, 20.2.1, 20.2.2 |
+
+---
+
+### Módulo 21: Front-end (`web/`)
+
+> Reflete RN28-RN33 na UI de Cliente e Admin, sem duplicar autorização/regra de negócio (a validação real permanece no backend, RN26 já estabelecido na Fase 4). Tabela de rastreabilidade ao final desta seção.
+
+- **Épico 21.1: Tipos e API client — espelha RN33, RN32**
+  - [ ] Task 21.1.1: Atualizar `web/src/types/pedido.ts`: `PedidoStatus` ganha `"aguardando_devolucao"`; `PaymentStatus` ganha `"estorno_pendente"`/`"reembolsado"`; `TRANSICOES_VALIDAS` atualizado para espelhar exatamente `VALID_TRANSITIONS` de `functions/src/services/pedidos.statusMachine.ts` (Task 18.2.1) — implementa a base de **RN33** no front (critério de aceite: `TRANSICOES_VALIDAS["enviado"]` passa a ser `["entregue", "aguardando_devolucao"]`; `TRANSICOES_VALIDAS["aguardando_devolucao"]` é `["cancelado"]`; comparação campo-a-campo com o backend documentada no teste correspondente, Task 22.7 não aplicável aqui — teste fica no próprio Módulo 22)
+  - [ ] Task 21.1.2: Adicionar `reembolsarPedido(id: string): Promise<Pedido>` em `web/src/api/pedidos.ts`, chamando `PATCH /pedidos/:id/reembolsar` (Task 20.2.1) — mesmo padrão de `alterarStatusPedido`/`cancelarPedido` já existentes (critério de aceite: função tipada, sem corpo de requisição, reaproveitando `request<T>` do `apiClient`)
+  Dependências: Módulos 19 e 20 completos (contratos finais de endpoint/campos já fechados); Épico 13.5 da Fase 4 (`apiClient` já existente).
+
+- **Épico 21.2: Área do Cliente — `OrderDetailPage.tsx` — implementa RN28, RN29**
+  - [ ] Task 21.2.1: Atualizar a condição de exibição do botão "Cancelar pedido" de `pedido.status === "pendente"` para `["pendente", "confirmado", "enviado"].includes(pedido.status)` — implementa **RN28**, **RN29** (critério de aceite: botão visível para os 3 status; ausente para `aguardando_devolucao`, `entregue`, `cancelado`)
+  - [ ] Task 21.2.2: Diferenciar o rótulo/aviso do botão conforme o status atual: em `pendente`/`confirmado`, mantém "Cancelar pedido"; em `enviado`, o rótulo/confirmação deixa explícito que o cancelamento aguardará confirmação de devolução do produto antes de virar `cancelado` (RN29) — a chamada de API continua sendo a mesma `PATCH /pedidos/:id/cancelar` em todos os casos, a decisão de destino (`cancelado` vs `aguardando_devolucao`) é sempre do backend (critério de aceite: usuário em pedido `enviado` vê o aviso distinto antes de confirmar a ação; nenhuma lógica de decisão de destino é replicada no front-end)
+  Dependências: Épico 21.1.
+
+- **Épico 21.3: Área do Admin — `AdminOrderDetailPage.tsx` — implementa RN29, RN30, RN32**
+  - [ ] Task 21.3.1: Confirmar que o seletor de transições já existente (`opcoesValidas = TRANSICOES_VALIDAS[pedido.status]`) passa a oferecer `"aguardando_devolucao"` quando o pedido está `enviado`, e `"cancelado"` quando está `aguardando_devolucao`, sem nenhuma alteração de código além da Task 21.1.1 (o componente já é dirigido pela tabela) — implementa **RN29**, **RN30** (critério de aceite: nenhuma mudança de código em `AdminOrderDetailPage.tsx` é necessária para esta task além da já feita em 21.1.1; comportamento confirmado por teste de componente, Módulo 22)
+  - [ ] Task 21.3.2: Adicionar botão "Solicitar reembolso", renderizado apenas quando `pedido.paymentStatus === "estorno_pendente"`, chamando `reembolsarPedido` (Task 21.1.2) e atualizando o pedido exibido em caso de sucesso — implementa **RN32** no front (critério de aceite: botão ausente para qualquer outro `paymentStatus`; presente e clicável para `"estorno_pendente"`; em sucesso, o `paymentStatus` exibido na tela muda para `"reembolsado"` sem reload manual; em falha — 502 simulado — mensagem de erro exibida via `ErrorMessage`, botão permanece disponível para nova tentativa, refletindo que `paymentStatus` continua `"estorno_pendente"` no backend)
+  Dependências: Épico 21.1.
+
+#### Rastreabilidade RN28-RN33 → Tasks (Módulo 21, reflexo no front-end)
+
+| Regra | Descrição resumida | Tasks que implementam |
+|---|---|---|
+| RN28 | Botão de cancelar visível também em `confirmado` | 21.2.1 |
+| RN29 | Botão de cancelar visível em `enviado`, com aviso de que aguarda devolução; seletor admin oferece `aguardando_devolucao` | 21.2.1, 21.2.2, 21.3.1 |
+| RN30 | Seletor admin oferece `cancelado` a partir de `aguardando_devolucao` | 21.3.1 |
+| RN32 | Botão "Solicitar reembolso" condicionado a `paymentStatus === "estorno_pendente"` | 21.1.2, 21.3.2 |
+| RN33 | Tipos/`TRANSICOES_VALIDAS` do front espelhando o backend | 21.1.1 |
+
+---
+
+### Módulo 22: Testes e regressão
+
+> Cobre RN28-RN33 em `functions/`, replica em `services/orders`+`services/payments` (Fase 3, sem deploy), cobre os componentes alterados do Módulo 21 e confirma zero regressão indevida nas RN01-RN27 já existentes (a única mudança de contrato esperada é `enviado→cancelado` deixar de ser uma transição válida, RN29/RN33 — documentada, não é regressão). Tabela de rastreabilidade consolidada ao final.
+
+- **Épico 22.1: Extensão dos mocks do Stripe**
+  - [ ] Task 22.1.1: Estender `test/helpers/mockStripe.ts` (Fase 2, Task 7.1.1) para simular também `stripe.refunds.create` (sucesso e erro configuráveis por teste) — critério de aceite: helper permite configurar retorno/erro de `refunds.create` por teste, sem chamada de rede real, suíte roda offline
+  Dependências: Módulo 20.
+
+- **Épico 22.2: Testes da máquina de estados — cobre RN33**
+  - [ ] Task 22.2.1: Teste unitário de `isValidTransition` cobrindo os novos casos: `enviado→aguardando_devolucao` (válido), `enviado→cancelado` (agora inválido), `aguardando_devolucao→cancelado` (válido), `aguardando_devolucao→entregue` (inválido) — cobre **RN33**
+  - [ ] Task 22.2.2: Revisar o teste de integração pré-existente da Fase 1 (Task 3.3.4, `enviado→confirmado rejeitada`/transições do Admin) para confirmar que ele não assume mais `enviado→cancelado` como cenário válido — ajustar o cenário para a nova regra sem remover a cobertura da transição `enviado→entregue` já existente — cobre **RN33** (critério de aceite: teste atualizado, comentário explícito de que a mudança reflete RN29/RN33, não uma regressão)
+  Dependências: Épico 22.1 (não obrigatório, mas mantém a suíte no mesmo PR); Módulo 18.
+
+- **Épico 22.3: Testes de cancelamento estendido — Cliente — cobre RN28, RN29**
+  - [ ] Task 22.3.1: Teste de cliente cancelando pedido `confirmado` → 200, `cancelado`, estoque restaurado — cobre **RN28**
+  - [ ] Task 22.3.2: Teste de cliente cancelando pedido `confirmado` com `paymentStatus: "pago"` → `paymentStatus` vira `"estorno_pendente"` — cobre **RN31**
+  - [ ] Task 22.3.3: Teste de cliente cancelando pedido `pendente` com `paymentStatus: "aguardando_pagamento"` → `paymentStatus` permanece inalterado (nunca vira `estorno_pendente` a partir de `pendente`) — cobre **RN31**
+  - [ ] Task 22.3.4: Teste de cliente "cancelando" pedido `enviado` → 200, `status` vira `aguardando_devolucao`, estoque inalterado, `paymentStatus` inalterado — cobre **RN29**
+  - [ ] Task 22.3.5: Teste de cliente tentando cancelar pedido em `aguardando_devolucao`, `entregue` e `cancelado` → 400 nos 3 casos, sem alteração no Firestore — cobre o limite de **RN29**
+  Dependências: Épico 22.1; Módulo 19 (Épico 19.3).
+
+- **Épico 22.4: Testes de cancelamento estendido — Admin — cobre RN29, RN30, RN31, RN07a**
+  - [ ] Task 22.4.1: Teste de admin transicionando pedido `enviado→aguardando_devolucao` → 200, sem alteração de estoque/`paymentStatus` — cobre **RN29**
+  - [ ] Task 22.4.2: Teste de admin transicionando `aguardando_devolucao→cancelado` → 200, estoque restaurado — cobre **RN30**
+  - [ ] Task 22.4.3: Teste de admin confirmando `aguardando_devolucao→cancelado` com `paymentStatus: "pago"` → vira `"estorno_pendente"` — cobre **RN31**
+  - [ ] Task 22.4.4: Teste de regressão de RN07a: admin cancelando pedido `confirmado` → estoque **não** restaurado (comportamento herdado da Fase 1, inalterado) — confirma explicitamente que a extensão de RN28 é exclusiva do Cliente e não vazou para o caminho do Admin (Decisão técnica 3) — cobre **RN07a**
+  - [ ] Task 22.4.5: Teste de admin tentando transicionar diretamente `enviado→cancelado` → 400 (transição não mais estruturalmente válida) — cobre **RN29**/**RN33**
+  Dependências: Épico 22.1; Módulo 19 (Épico 19.4).
+
+- **Épico 22.5: Testes do endpoint de reembolso — cobre RN32**
+  - [ ] Task 22.5.1: Teste `PATCH /pedidos/:id/reembolsar` com `paymentStatus: "estorno_pendente"` + Stripe mockado com sucesso → 200, `paymentStatus` vira `"reembolsado"`, `status` do pedido inalterado
+  - [ ] Task 22.5.2: Teste `PATCH /pedidos/:id/reembolsar` com `paymentStatus: "estorno_pendente"` + Stripe mockado falhando → 502, `paymentStatus` permanece `"estorno_pendente"` (permite nova tentativa)
+  - [ ] Task 22.5.3: Teste `PATCH /pedidos/:id/reembolsar` com `paymentStatus` diferente de `"estorno_pendente"` (`"pago"`, `"reembolsado"`, `"aguardando_pagamento"`, `"falhou"`) → 400 em todos, nenhuma chamada ao Stripe
+  - [ ] Task 22.5.4: Teste `PATCH /pedidos/:id/reembolsar` por não-admin → 403; sem token → 401
+  Dependências: Épico 22.1; Módulo 20.
+
+- **Épico 22.6: Regressão e cobertura final — `functions/`**
+  - [ ] Task 22.6.1: Rodar a suíte completa (Fases 1-5) contra o Emulator Suite e confirmar zero regressão indevida além da mudança de contrato documentada de `enviado→cancelado` (Épico 22.2) — critério de aceite: `npm run test:emulator` verde, nenhum teste pré-existente quebrado por motivo diferente da mudança de contrato já documentada
+  - [ ] Task 22.6.2: Confirmar que a cobertura ≥70% (threshold já configurado desde a Fase 1, Task 3.5.1) se mantém com o novo código dos Módulos 18-20 (critério de aceite: `npm run test:coverage` reporta ≥70% em todas as métricas)
+  - [ ] Task 22.6.3: Produzir, em conjunto com o agente qa-negocio, a tabela final de rastreabilidade RN28-RN33 → testes automatizados, consolidando as tabelas por módulo acima (critério de aceite: tabela sem nenhuma RN28-RN33 órfã de teste)
+  Dependências: Épicos 22.2-22.5 completos.
+
+- **Épico 22.7: Replicação em `services/orders` + `services/payments` (Fase 3, sem deploy) — Decisão técnica 6**
+  - [ ] Task 22.7.1: Replicar em `services/orders/src/services/pedidos.statusMachine.ts` e `services/orders/src/models/pedido.ts` as mesmas alterações do Módulo 18 (mesma duplicação deliberada já documentada na Decisão técnica 4 da Fase 3) — só código-fonte, nenhuma ação de deploy (critério de aceite: `npm run build` dentro de `services/orders` compila sem erro; nenhum comando `firebase deploy`/`gcloud` é executado nesta task)
+  - [ ] Task 22.7.2: Replicar em `services/orders/src/services/pedidosService.ts` e `services/orders/src/routes/pedidos.routes.ts` a mesma lógica do Módulo 19 (cancelamento estendido, RN28-RN31) — nenhuma dependência de Stripe é introduzida em `services/orders` (a lógica de estoque/`paymentStatus` é autocontida, sem chamada de rede) (critério de aceite: comportamento idêntico ao de `functions/` nos testes equivalentes, validado localmente contra o Firestore Emulator, sem nenhuma ação em produção real)
+  - [ ] Task 22.7.3: Replicar RN32 respeitando a fronteira já estabelecida na Fase 3 (Decisão técnica 6): criar em `services/payments` o endpoint interno `POST /internal/refunds` (protegido por `verifyInternalToken`, já existente), recebendo `{ paymentIntentId, amount }`, chamando `stripe.refunds.create` e retornando `{ refundId, status }`; em `services/orders`, `reembolsarPedido` usa `payments.internalClient.ts` (já existente) para chamar esse endpoint, seguido do mesmo `update` não-transacional de `paymentStatus` do Módulo 20 (critério de aceite: `PATCH /pedidos/:id/reembolsar` em `services/orders` funciona de ponta a ponta no Emulator Suite multi-codebase, com o cliente HTTP interno mockado nos testes automatizados; nenhuma referência a `stripeClient`/`stripeService` resta em `services/orders`, mantendo a fronteira já estabelecida na Fase 3)
+  - [ ] Task 22.7.4: Replicar/adaptar os testes equivalentes aos Épicos 22.2-22.5 em `services/orders` e `services/payments`, mockando a comunicação HTTP interna onde aplicável (mesmo padrão do Módulo 12 da Fase 3) — critério de aceite: `npm test` verde em ambas as pastas; cobertura ≥70% mantida em ambas
+  - [ ] Task 22.7.5: Checklist de revisão de PR confirmando explicitamente que nenhuma task deste épico executou `firebase deploy`, `gcloud`, ou qualquer comando que afete o projeto Firebase real — só edição de arquivos-fonte e execução local de testes/emuladores (critério de aceite: PR descreve a checklist marcada; nenhum log/evidência de deploy real anexado, ao contrário do que já ocorreu nas Fases 1/2 para código de produção)
+  Dependências: Épicos 22.2-22.6 completos em `functions/` (comportamento validado e estável antes de replicar).
+
+#### Rastreabilidade RN28-RN33 → Tasks de teste (consolidada, Módulo 22)
+
+| Regra | Tasks de teste que cobrem |
+|---|---|
+| RN28 | 22.3.1 |
+| RN29 | 22.3.4, 22.3.5, 22.4.1, 22.4.5 |
+| RN30 | 22.4.2 |
+| RN31 | 22.3.2, 22.3.3, 22.4.3 |
+| RN32 | 22.5.1, 22.5.2, 22.5.3, 22.5.4 |
+| RN33 | 22.2.1, 22.2.2, 22.4.5 |
+
+---
+
+### Rastreabilidade RN28-RN33 → Tasks (consolidada, todos os módulos da Fase 5)
+
+| Regra | Descrição resumida | Tasks que implementam (código) | Tasks que implementam (testes) |
+|---|---|---|---|
+| RN28 | Cliente cancela `pendente` ou `confirmado` → `cancelado` imediato, estoque restaurado nos dois casos | 19.3.1, 21.2.1 | 22.3.1 |
+| RN29 | Cancelar a partir de `enviado` (Cliente ou Admin) vai para `aguardando_devolucao`, não direto a `cancelado` | 18.2.1, 19.3.2, 19.4.3, 19.4.4, 21.2.1, 21.2.2, 21.3.1 | 22.3.4, 22.3.5, 22.4.1, 22.4.5 |
+| RN30 | Só Admin transiciona `aguardando_devolucao→cancelado`; estoque restaurado | 19.4.1, 21.3.1 | 22.4.2 |
+| RN31 | Nenhuma transição a `cancelado` reembolsa automaticamente; se `paymentStatus` era `"pago"`, vira `"estorno_pendente"` | 19.1.1, 19.3.1, 19.4.2 | 22.3.2, 22.3.3, 22.4.3 |
+| RN32 | Admin solicita reembolso via Stripe quando `paymentStatus === "estorno_pendente"`; sucesso → `"reembolsado"`; falha → mantém `"estorno_pendente"`, 502 | 20.1.1, 20.1.2, 20.2.1, 20.2.2, 21.1.2, 21.3.2 | 22.5.1, 22.5.2, 22.5.3, 22.5.4 |
+| RN33 | Novos valores de enum e máquina de estados atualizada | 18.1.1, 18.1.2, 18.2.1, 18.2.2, 21.1.1 | 22.2.1, 22.2.2 |
+
+### Fora de escopo desta rodada (delegado diretamente ao devops-tech-writer a partir da spec)
+
+Os Requisitos de DevOps & Doc da Fase 5 (seção 4 da spec): nenhum segredo novo (reaproveita `STRIPE_SECRET_KEY` já configurado); atualizar o README (raiz) com a documentação da máquina de estados e do fluxo de cancelamento/reembolso, deixando claro que o reembolso é sempre uma ação manual e deliberada do Admin, nunca automática; sem mudança na estratégia de deploy (`workflow_dispatch`, manual, Task 4.5.1 já existente) — esta fase, assim como as demais mudanças em `functions/` desde a Fase 2, só é promovida a produção real mediante decisão explícita do usuário.
+
+### Bloqueios (a levar de volta ao agente clarificador)
+
+Nenhum bloqueio de negócio identificado nesta rodada. A única nuance encontrada durante o planejamento — se a restauração de estoque estendida do Admin (RN30, `aguardando_devolucao→cancelado`) também deveria se aplicar à transição já existente `confirmado→cancelado` do Admin (RN07a, Fase 1) — **não é uma lacuna**: foi resolvida por leitura combinada de RN28 (que fala exclusivamente do Cliente) e RN07a (que a spec não menciona alterar para o Admin nesta fase), preservando deliberadamente a assimetria Cliente/Admin já estabelecida desde a Fase 1. Documentada como Decisão técnica 3 acima, com Tasks 19.4.1/22.4.4 garantindo cobertura de teste explícita para essa nuance, exatamente para que ela não seja confundida com um bug caso alguém note a assimetria durante a implementação ou QA.
+
+Demais decisões (nome/verbo/formato exato do endpoint de reembolso, ponto único de checagem de RN31, código HTTP de precondição de estado, sequenciamento dos módulos, fronteira de replicação para `services/`) são detalhes técnicos de implementação, delegados pela própria spec ao arquiteto-tarefas, e foram resolvidos e documentados na seção "Decisões técnicas registradas nesta rodada" acima.
