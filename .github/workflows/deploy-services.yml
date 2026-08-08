@@ -1,0 +1,113 @@
+name: Deploy Microsserviços (Fase 3)
+
+# Implementa o Épico 8.6 (Task 8.6.1) do BACKLOG.md, espelhando o mesmo
+# padrão de segurança já usado em deploy.yml (Épico 4.5, Task 4.5.1) para
+# os 3 novos codebases da Fase 3: orders, payments, notifications.
+#
+# DECISÃO: deploy MANUAL via `workflow_dispatch`, nunca automático em push/
+# merge — mesmo racional de deploy.yml (projeto de portfólio rodando em
+# projeto Firebase real, plano Blaze; deploy automático a cada merge
+# geraria custo e risco desnecessários).
+#
+# O corte de produção inicial (bootstrap dos 3 codebases + preenchimento
+# de SELF_BASE_URL/PAYMENTS_BASE_URL/ORDERS_BASE_URL + primeiro deploy do
+# Hosting) foi feito manualmente via CLI local (ver README.md > "Corte de
+# produção real"), já que exigia 2 passes de deploy para descobrir as URLs
+# reais do Cloud Run antes de poder preenchê-las. Este workflow serve para
+# deploys subsequentes (mudanças de código nos 3 serviços), quando as URLs
+# já são conhecidas e estáveis.
+#
+# Pré-requisitos (idênticos a deploy.yml):
+#   1. Secret do GitHub Actions `FIREBASE_SERVICE_ACCOUNT_KEY` configurado.
+#   2. Secrets de aplicação (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+#      RESEND_API_KEY) já configurados no Firebase Secret Manager — nunca
+#      como GitHub Secret nem em código.
+#   3. services/orders/.env.gscandelari-ecommerce-api e
+#      services/payments/.env.gscandelari-ecommerce-api já commitados com
+#      as URLs reais de produção (não são segredo — ver esses arquivos).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite "deploy" para confirmar o deploy dos microsserviços para o projeto Firebase real'
+        required: true
+
+jobs:
+  test:
+    name: Lint, build e testes — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event.inputs.confirm == 'deploy'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [orders, payments, notifications]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Configurar Java (necessário para Firestore/Auth Emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Instalar dependências (npm ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatação (Prettier)
+        run: npm run format:check
+
+      - name: Build (TypeScript)
+        run: npm run build
+
+      - name: Testes (Jest + Supertest) contra o Firebase Emulator Suite
+        # Reexecuta o gate de qualidade antes de deployar, mesmo que `main`
+        # já tenha passado no ci-services.yml no merge — defesa em
+        # profundidade, mesmo padrão de deploy.yml.
+        run: npm run test:coverage:emulator
+
+  deploy:
+    name: Deploy para Firebase Functions (orders, payments, notifications) + Hosting
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event.inputs.confirm == 'deploy'
+    environment: production
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Gravar credencial de Service Account (temporária, não commitada)
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$RUNNER_TEMP/firebase-service-account.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+
+      - name: Deploy para Firebase Functions (codebases orders/payments/notifications) + Hosting
+        # Escopo explícito: NUNCA inclui `functions:default` (monólito
+        # Fase 1+2, cuidado exclusivamente por deploy.yml).
+        run: npx firebase-tools deploy --only functions:orders,functions:payments,functions:notifications,hosting --project "$FIREBASE_PROJECT_ID" --non-interactive
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          FIREBASE_PROJECT_ID: gscandelari-ecommerce-api
+
+      - name: Remover credencial temporária
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-service-account.json"
