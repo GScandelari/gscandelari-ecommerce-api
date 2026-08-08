@@ -12,6 +12,13 @@ import app from "./app";
  * menor privilegio (`orders-runtime@...`, Task 9.1.3/9.1.4) em vez da SA
  * default do Compute Engine - lida de env var pra nao quebrar o emulador
  * local (onde a var nao existe e a opcao fica undefined, sem efeito).
+ *
+ * IMPORTANTE: exportar como identificador simples `api` (nao como
+ * `export { x as "orders-api" }`) - o Firebase ja prefixa automaticamente
+ * pelo nome do codebase (Task 8.5.2), produzindo "orders-api" no deploy.
+ * Um nome de export literal com hifen quebra a resolucao de entry_point
+ * do Cloud Functions real ("Function 'orders.api' is not defined in the
+ * provided module") - bug so visivel no deploy real, nunca no emulador
+ * (que resolve exports por introspeccao direta, sem essa etapa).
  */
-const ordersApi = onRequest({ serviceAccount: process.env.RUNTIME_SERVICE_ACCOUNT_EMAIL }, app);
-export { ordersApi as "orders-api" };
+export const api = onRequest({ serviceAccount: process.env.RUNTIME_SERVICE_ACCOUNT_EMAIL }, app);
