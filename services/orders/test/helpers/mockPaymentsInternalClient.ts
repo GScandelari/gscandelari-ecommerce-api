@@ -15,11 +15,17 @@
  */
 
 export const mockCriarPaymentIntent = jest.fn();
+/**
+ * Fase 5 (Modulo 22.7 - RN32): `reembolsarPagamento(paymentIntentId, amount)`
+ * -> `void`, mesmo padrao de mock de fronteira.
+ */
+export const mockReembolsarPagamento = jest.fn();
 
 jest.mock(
   "@/services/payments.internalClient",
   () => ({
     criarPaymentIntent: mockCriarPaymentIntent,
+    reembolsarPagamento: mockReembolsarPagamento,
   }),
   { virtual: true },
 );
@@ -29,4 +35,5 @@ jest.mock(
  */
 export function resetPaymentsInternalClientMocks(): void {
   mockCriarPaymentIntent.mockReset();
+  mockReembolsarPagamento.mockReset();
 }

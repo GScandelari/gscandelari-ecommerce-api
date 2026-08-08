@@ -10,6 +10,8 @@
 
 export const mockPaymentIntentsCreate = jest.fn();
 export const mockWebhooksConstructEvent = jest.fn();
+/** Fase 5 (Modulo 22.7 - RN32): `stripe.refunds.create`. */
+export const mockRefundsCreate = jest.fn();
 
 jest.mock(
   "@/stripeClient",
@@ -20,6 +22,9 @@ jest.mock(
       },
       webhooks: {
         constructEvent: mockWebhooksConstructEvent,
+      },
+      refunds: {
+        create: mockRefundsCreate,
       },
     }),
   }),
@@ -32,4 +37,5 @@ jest.mock(
 export function resetStripeMocks(): void {
   mockPaymentIntentsCreate.mockReset();
   mockWebhooksConstructEvent.mockReset();
+  mockRefundsCreate.mockReset();
 }

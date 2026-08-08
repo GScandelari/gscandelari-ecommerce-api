@@ -26,3 +26,16 @@ export async function criarPaymentIntent(
     clientSecret: paymentIntent.client_secret as string,
   };
 }
+
+/**
+ * RN32 (Fase 5): estorno total via Stripe, chamado pelo endpoint interno
+ * `POST /internal/refunds` (Orders e o unico chamador, via
+ * `payments.internalClient.ts`). Mesmo contrato reduzido ja usado para
+ * `criarPaymentIntent` - Payments nao conhece o tipo `Pedido`, so
+ * `paymentIntentId`/`amount` (em centavos, calculado por Orders a partir de
+ * `pedido.total`).
+ */
+export async function reembolsarPagamento(paymentIntentId: string, amount: number): Promise<void> {
+  const stripe = getStripeClient();
+  await stripe.refunds.create({ payment_intent: paymentIntentId, amount });
+}

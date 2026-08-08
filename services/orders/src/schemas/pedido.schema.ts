@@ -15,7 +15,14 @@ export const criarPedidoSchema = z.object({
 });
 
 export const alterarStatusSchema = z.object({
-  status: z.enum(["pendente", "confirmado", "enviado", "entregue", "cancelado"]),
+  status: z.enum([
+    "pendente",
+    "confirmado",
+    "enviado",
+    "entregue",
+    "aguardando_devolucao",
+    "cancelado",
+  ]),
 });
 
 export type CriarPedidoPayload = z.infer<typeof criarPedidoSchema>;

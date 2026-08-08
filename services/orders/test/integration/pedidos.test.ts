@@ -271,7 +271,11 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
       expect(await lerEstoqueDireto(produtoId)).toBe(6);
     });
 
-    it("RN07a: admin cancelando pedido enviado NAO restaura estoque", async () => {
+    // Fase 5 (Modulo 22.7, RN29/RN33): MUDANCA DE CONTRATO INTENCIONAL, NAO
+    // REGRESSAO - enviado->cancelado deixou de ser uma transicao
+    // estruturalmente valida (ver pedidosCancelamentoExtendido.test.ts para
+    // o novo fluxo via aguardando_devolucao).
+    it("RN29/RN33: admin tentando cancelar pedido enviado diretamente (enviado->cancelado) recebe 400", async () => {
       const produtoId = await criarProduto(adminUser, { estoque: 10 });
       const pedido = await request(app)
         .post("/pedidos")
@@ -292,7 +296,7 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
         .set("Authorization", `Bearer ${adminUser.idToken}`)
         .send({ status: "cancelado" });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
       expect(await lerEstoqueDireto(produtoId)).toBe(6);
     });
   });
@@ -315,17 +319,24 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
       expect(await lerEstoqueDireto(produtoId)).toBe(10);
     });
 
-    it("cliente tenta cancelar pedido fora de pendente -> 400", async () => {
+    // Fase 5 (Modulo 22.7, RN28): AJUSTE DE CONSISTENCIA - confirmado deixou
+    // de ser um exemplo valido de "fora do que o cliente pode cancelar" (RN28
+    // estende o cancelamento do cliente para confirmado - ver
+    // pedidosCancelamentoExtendido.test.ts). Usa entregue, que continua fora
+    // do alcance do cliente em qualquer fase.
+    it("cliente tenta cancelar pedido fora do que lhe e permitido (entregue) -> 400", async () => {
       const produtoId = await criarProduto(adminUser, { estoque: 10 });
       const pedido = await request(app)
         .post("/pedidos")
         .set("Authorization", `Bearer ${clienteA.idToken}`)
         .send({ itens: [{ produtoId, quantidade: 1 }] });
 
-      await request(app)
-        .patch(`/pedidos/${pedido.body.id}/status`)
-        .set("Authorization", `Bearer ${adminUser.idToken}`)
-        .send({ status: "confirmado" });
+      for (const status of ["confirmado", "enviado", "entregue"]) {
+        await request(app)
+          .patch(`/pedidos/${pedido.body.id}/status`)
+          .set("Authorization", `Bearer ${adminUser.idToken}`)
+          .send({ status });
+      }
 
       const res = await request(app)
         .patch(`/pedidos/${pedido.body.id}/cancelar`)

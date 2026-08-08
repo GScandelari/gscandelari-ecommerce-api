@@ -1,10 +1,10 @@
 import { getAdminApp } from "@/firebaseAdmin";
 import { ForbiddenError, NotFoundError, PaymentGatewayError, ValidationError } from "@/errors";
-import { Pedido, PedidoInput, ItemPedido } from "@/models/pedido";
+import { Pedido, PedidoInput, ItemPedido, PaymentStatus } from "@/models/pedido";
 import { produtosCollection } from "@/repositories/produtosRepository";
-import { pedidosCollection } from "@/repositories/pedidosRepository";
+import { getPedido, pedidosCollection } from "@/repositories/pedidosRepository";
 import { isValidTransition, PedidoStatus } from "@/services/pedidos.statusMachine";
-import { criarPaymentIntent } from "@/services/payments.internalClient";
+import { criarPaymentIntent, reembolsarPagamento } from "@/services/payments.internalClient";
 
 export interface CriarPedidoItemInput {
   produtoId: string;
@@ -112,6 +112,21 @@ async function restaurarEstoque(
   });
 }
 
+/**
+ * RN31 (Fase 5): unico ponto de decisao sobre o que acontece com
+ * `paymentStatus` quando um pedido transiciona para `cancelado` - mesma
+ * replicacao 1:1 de `functions/src/services/pedidosService.ts` (Decisao
+ * tecnica 4 da Fase 3).
+ */
+function determinarPaymentStatusAoCancelar(paymentStatusAtual: PaymentStatus): PaymentStatus {
+  return paymentStatusAtual === "pago" ? "estorno_pendente" : paymentStatusAtual;
+}
+
+/**
+ * RN05, RN07, RN07a, RN29, RN30, RN31: transicao de status disparada pelo
+ * Admin. Ver `functions/src/services/pedidosService.ts` para o raciocinio
+ * completo (identico aqui).
+ */
 export async function alterarStatusAdmin(
   pedidoId: string,
   novoStatus: PedidoStatus,
@@ -130,16 +145,30 @@ export async function alterarStatusAdmin(
       throw new ValidationError(`Transicao de status invalida: ${pedido.status} -> ${novoStatus}.`);
     }
 
-    if (novoStatus === "cancelado" && pedido.status === "pendente") {
-      await restaurarEstoque(tx, pedido.itens);
+    let paymentStatus = pedido.paymentStatus;
+    if (novoStatus === "cancelado") {
+      if (pedido.status === "pendente" || pedido.status === "aguardando_devolucao") {
+        await restaurarEstoque(tx, pedido.itens);
+      }
+      paymentStatus = determinarPaymentStatusAoCancelar(pedido.paymentStatus);
     }
 
-    const data: PedidoInput = { ...pedido, status: novoStatus, updatedAt: new Date() };
+    const data: PedidoInput = {
+      ...pedido,
+      status: novoStatus,
+      paymentStatus,
+      updatedAt: new Date(),
+    };
     tx.set(pedidoRef, data);
     return { id: pedidoRef.id, ...data };
   });
 }
 
+/**
+ * RN06, RN08, RN28, RN29: cancelamento pelo cliente dono. Ver
+ * `functions/src/services/pedidosService.ts` para o raciocinio completo
+ * (identico aqui).
+ */
 export async function cancelarPedidoCliente(pedidoId: string, clienteId: string): Promise<Pedido> {
   const db = getAdminApp().firestore();
   const pedidoRef = pedidosCollection().doc(pedidoId);
@@ -154,15 +183,32 @@ export async function cancelarPedidoCliente(pedidoId: string, clienteId: string)
     if (pedido.clienteId !== clienteId) {
       throw new ForbiddenError("Voce so pode cancelar os proprios pedidos.");
     }
-    if (pedido.status !== "pendente") {
-      throw new ValidationError("So e possivel cancelar pedidos com status 'pendente'.");
+
+    if (pedido.status === "pendente" || pedido.status === "confirmado") {
+      await restaurarEstoque(tx, pedido.itens);
+      const data: PedidoInput = {
+        ...pedido,
+        status: "cancelado",
+        paymentStatus: determinarPaymentStatusAoCancelar(pedido.paymentStatus),
+        updatedAt: new Date(),
+      };
+      tx.set(pedidoRef, data);
+      return { id: pedidoRef.id, ...data };
     }
 
-    await restaurarEstoque(tx, pedido.itens);
+    if (pedido.status === "enviado") {
+      const data: PedidoInput = {
+        ...pedido,
+        status: "aguardando_devolucao",
+        updatedAt: new Date(),
+      };
+      tx.set(pedidoRef, data);
+      return { id: pedidoRef.id, ...data };
+    }
 
-    const data: PedidoInput = { ...pedido, status: "cancelado", updatedAt: new Date() };
-    tx.set(pedidoRef, data);
-    return { id: pedidoRef.id, ...data };
+    throw new ValidationError(
+      "So e possivel cancelar pedidos com status 'pendente', 'confirmado' ou 'enviado'.",
+    );
   });
 }
 
@@ -216,4 +262,33 @@ export async function cancelarPedidoPorFalhaPagamento(pedidoId: string): Promise
     };
     tx.set(pedidoRef, data);
   });
+}
+
+/**
+ * RN32 (Fase 5, Decisao tecnica 6): solicita o estorno via Payments (chamada
+ * HTTP interna, `payments.internalClient.ts`) - Orders nunca fala com o
+ * Stripe diretamente. Mesmo raciocinio de `functions/src/services/pedidosService.ts`:
+ * chamada de rede sempre fora de `db.runTransaction`; falha mantem
+ * `paymentStatus: "estorno_pendente"` (permite nova tentativa).
+ */
+export async function reembolsarPedido(pedidoId: string): Promise<Pedido> {
+  const pedido = await getPedido(pedidoId);
+  if (!pedido) {
+    throw new NotFoundError("Pedido nao encontrado.");
+  }
+  if (pedido.paymentStatus !== "estorno_pendente") {
+    throw new ValidationError(
+      "So e possivel solicitar reembolso para pedidos com paymentStatus 'estorno_pendente'.",
+    );
+  }
+
+  try {
+    await reembolsarPagamento(pedido.paymentIntentId as string, Math.round(pedido.total * 100));
+  } catch {
+    throw new PaymentGatewayError("Nao foi possivel processar o reembolso junto ao Stripe.");
+  }
+
+  const updatedAt = new Date();
+  await pedidosCollection().doc(pedidoId).update({ paymentStatus: "reembolsado", updatedAt });
+  return { ...pedido, paymentStatus: "reembolsado", updatedAt };
 }

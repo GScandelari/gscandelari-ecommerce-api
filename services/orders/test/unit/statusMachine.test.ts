@@ -12,12 +12,15 @@ describe("Maquina de estados de status do Pedido - RN05 (Task 2.6.1 / 3.3.4)", (
     ["pendente", "cancelado"],
     // RN05 (SPEC.md) foi emendada apos o relatorio do qa-negocio: a
     // maquina de estados estrutural e agnostica de papel, entao cancelado
-    // e alcancavel tambem a partir de confirmado/enviado. Quem pode
-    // efetivamente disparar cada transicao (cliente so a partir de
-    // pendente, admin a partir de qualquer uma destas tres) e decidido na
-    // camada de rota/servico (RN06/RN07/RN07a), nao aqui.
+    // e alcancavel tambem a partir de confirmado. Quem pode efetivamente
+    // disparar cada transicao (cliente a partir de pendente/confirmado,
+    // admin a partir de qualquer uma) e decidido na camada de
+    // rota/servico (RN06/RN07/RN07a/RN28), nao aqui.
     ["confirmado", "cancelado"],
-    ["enviado", "cancelado"],
+    // Fase 5 (Modulo 22.7 - RN29, RN30, RN33): enviado nao vai mais direto
+    // para cancelado - passa por aguardando_devolucao primeiro.
+    ["enviado", "aguardando_devolucao"],
+    ["aguardando_devolucao", "cancelado"],
   ];
 
   it.each(validTransitions)("RN05: %s -> %s deve ser valida", (from, to) => {
@@ -33,6 +36,11 @@ describe("Maquina de estados de status do Pedido - RN05 (Task 2.6.1 / 3.3.4)", (
     // permitidas ao admin ("cancelar em qualquer estado ANTERIOR a
     // entregue"), entao esta e invalida para qualquer papel.
     ["entregue", "cancelado"],
+    // Fase 5 (RN29/RN33): mudanca de contrato intencional - enviado nao
+    // vai mais direto para cancelado (precisa passar por
+    // aguardando_devolucao primeiro, RN29/RN30).
+    ["enviado", "cancelado"],
+    ["aguardando_devolucao", "entregue"],
   ];
 
   it.each(invalidTransitions)("RN05: %s -> %s deve ser invalida", (from, to) => {

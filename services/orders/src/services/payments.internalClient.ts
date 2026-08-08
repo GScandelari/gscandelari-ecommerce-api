@@ -38,3 +38,31 @@ export async function criarPaymentIntent(
 
   return (await response.json()) as CriarPaymentIntentResult;
 }
+
+/**
+ * RN32 (Fase 5, Decisao tecnica 6): mesma fronteira ja estabelecida na Fase
+ * 3 para RN16 - Orders nunca fala com o Stripe diretamente, sempre via
+ * chamada HTTP interna a Payments (unico servico com `stripeClient.ts`).
+ */
+export async function reembolsarPagamento(paymentIntentId: string, amount: number): Promise<void> {
+  const paymentsBaseUrl = process.env.PAYMENTS_BASE_URL;
+  if (!paymentsBaseUrl) {
+    throw new Error("PAYMENTS_BASE_URL nao configurada.");
+  }
+
+  const token = await mintInternalToken(paymentsBaseUrl);
+
+  const response = await fetch(`${paymentsBaseUrl}/internal/refunds`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ paymentIntentId, amount }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Chamada interna a Payments falhou (HTTP ${response.status}): ${body}`);
+  }
+}

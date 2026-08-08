@@ -1,10 +1,14 @@
 // Este import DEVE vir antes de `../../src/stripeService` para que o mock
 // virtual sobre "@/stripeClient" seja registrado antes do primeiro require.
-import { mockPaymentIntentsCreate, resetStripeMocks } from "../helpers/mockStripe";
+import {
+  mockPaymentIntentsCreate,
+  mockRefundsCreate,
+  resetStripeMocks,
+} from "../helpers/mockStripe";
 // Task 8.3.2 (Modulo 8 - AINDA NAO IMPLEMENTADO): assinatura adaptada de
 // `criarPaymentIntent`, eliminando a dependencia do tipo `Pedido` completo em
 // Payments (Decisao tecnica 3 do BACKLOG).
-import { criarPaymentIntent } from "../../src/stripeService";
+import { criarPaymentIntent, reembolsarPagamento } from "../../src/stripeService";
 
 describe("stripeService.criarPaymentIntent(pedidoId, total) - contrato simplificado (Decisao tecnica 3 / Task 8.3.2)", () => {
   beforeEach(() => {
@@ -40,6 +44,32 @@ describe("stripeService.criarPaymentIntent(pedidoId, total) - contrato simplific
     mockPaymentIntentsCreate.mockRejectedValue(new Error("stripe indisponivel (simulado)"));
 
     await expect(criarPaymentIntent("pedido-456", 10)).rejects.toThrow(
+      "stripe indisponivel (simulado)",
+    );
+  });
+});
+
+// Fase 5 (Modulo 22.7 - RN32): mesmo padrao de contrato reduzido.
+describe("stripeService.reembolsarPagamento(paymentIntentId, amount)", () => {
+  beforeEach(() => {
+    resetStripeMocks();
+  });
+
+  it("chama stripe.refunds.create com payment_intent e amount recebidos, sem transformacao", async () => {
+    mockRefundsCreate.mockResolvedValue({ id: "re_abc", status: "succeeded" });
+
+    await reembolsarPagamento("pi_abc123", 6000);
+
+    expect(mockRefundsCreate).toHaveBeenCalledWith({
+      payment_intent: "pi_abc123",
+      amount: 6000,
+    });
+  });
+
+  it("propaga o erro do Stripe para o chamador (traduzido em PaymentGatewayError pela rota interna, RN32)", async () => {
+    mockRefundsCreate.mockRejectedValue(new Error("stripe indisponivel (simulado)"));
+
+    await expect(reembolsarPagamento("pi_falha", 1000)).rejects.toThrow(
       "stripe indisponivel (simulado)",
     );
   });
