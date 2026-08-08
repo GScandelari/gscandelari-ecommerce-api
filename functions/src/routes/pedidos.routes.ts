@@ -10,6 +10,7 @@ import {
   alterarStatusAdmin,
   cancelarPedidoCliente,
   criarPedidoComPagamento,
+  reembolsarPedido,
 } from "@/services/pedidosService";
 
 const router = Router();
@@ -62,11 +63,22 @@ router.patch(
   }),
 );
 
-// Task 2.6.6 - RN06, RN08, RN09
+// Task 2.6.6 - RN06, RN08, RN09, RN28, RN29
 router.patch(
   "/:id/cancelar",
   asyncHandler(async (req, res) => {
     const pedido = await cancelarPedidoCliente(req.params.id, req.user!.uid);
+    res.status(200).json(pedido);
+  }),
+);
+
+// Task 20.2.1 (Fase 5) - RN32. requireAdmin roda antes de qualquer
+// checagem de paymentStatus (mesmo padrao das demais rotas admin-only).
+router.patch(
+  "/:id/reembolsar",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const pedido = await reembolsarPedido(req.params.id);
     res.status(200).json(pedido);
   }),
 );

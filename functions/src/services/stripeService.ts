@@ -24,3 +24,18 @@ export async function criarPaymentIntent(pedido: Pedido): Promise<CriarPaymentIn
     clientSecret: paymentIntent.client_secret as string,
   };
 }
+
+/**
+ * RN32 (Fase 5): solicita o estorno total de um Pedido ja cobrado junto ao
+ * Stripe. Valor explicito em centavos (mesmo padrao de `criarPaymentIntent`)
+ * em vez de omitir `amount` (que estornaria o valor implicito ja capturado
+ * na PaymentIntent) - mantem o comportamento determinístico e testavel com
+ * o SDK mockado. Sem reembolso parcial nesta fase.
+ */
+export async function reembolsarPagamento(pedido: Pedido): Promise<void> {
+  const stripe = getStripeClient();
+  await stripe.refunds.create({
+    payment_intent: pedido.paymentIntentId as string,
+    amount: Math.round(pedido.total * 100),
+  });
+}

@@ -86,7 +86,14 @@
       },
       "PedidoStatus": {
         "type": "string",
-        "enum": ["pendente", "confirmado", "enviado", "entregue", "cancelado"]
+        "enum": [
+          "pendente",
+          "confirmado",
+          "enviado",
+          "entregue",
+          "aguardando_devolucao",
+          "cancelado"
+        ]
       },
       "Pedido": {
         "type": "object",
@@ -325,13 +332,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Pedido cancelado; estoque dos itens restaurado.",
+            "description": "Pedido cancelado ('pendente'/'confirmado', RN06/RN28) ou movido para 'aguardando_devolucao' (a partir de 'enviado', RN29) - estoque dos itens restaurado apenas no primeiro caso.",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
             }
           },
           "400": {
-            "description": "Pedido nao esta mais em 'pendente' (RN06).",
+            "description": "Pedido fora de um status que o Cliente pode cancelar ('pendente', 'confirmado' ou 'enviado' - RN06/RN28/RN29).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
             }
@@ -339,6 +346,39 @@
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },
           "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos/{id}/reembolsar": {
+      "patch": {
+        "tags": ["Pedidos"],
+        "operationId": "reembolsarPedido",
+        "summary": "Admin solicita o reembolso via Stripe de um pedido cancelado (RN32) - Fase 5",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reembolso processado com sucesso; paymentStatus do pedido passa a 'reembolsado'.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": {
+            "description": "Pedido nao esta com paymentStatus 'estorno_pendente' (RN31/RN32).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "502": {
+            "description": "Falha na chamada ao Stripe - paymentStatus permanece 'estorno_pendente', permite nova tentativa.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
         }
       }
     }
