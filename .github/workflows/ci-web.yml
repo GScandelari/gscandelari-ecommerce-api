@@ -1,22 +1,18 @@
-name: CI - Front-end de testes (Fase 4)
+name: CI - Front-end de testes
 
-# Implementa a secao 4 "Requisitos de DevOps & Doc" da Fase 4 (SPEC.md) e o
-# item "Fora de escopo desta rodada (delegado ao devops-tech-writer)" da
-# secao Fase 4 do BACKLOG.md: CI leve (lint + build + test) para `web/`,
-# mesmo padrao de `ci-services.yml` (Fase 3) - checkout, Node 20 com cache
-# de npm, `npm ci`, lint, formatacao, build, testes.
+# CI leve (lint + build + test) para `web/`, a SPA de teste/demonstracao
+# da API (Emulator Suite local, RN27) - mesmo padrao de `ci-services.yml`:
+# checkout, Node 20 com cache de npm, `npm ci`, lint, formatacao, build,
+# testes.
 #
 # Diferencas deliberadas em relacao a `ci-services.yml`:
-#   - SEM step de deploy: a aplicacao web/ nao e publicada nesta fase (uso
-#     local/experimentacao contra o Emulator Suite, decisao explicita do
-#     usuario - ver BACKLOG.md, secao Fase 4).
+#   - SEM step de deploy: `web/` nao e publicada (uso local/experimentacao
+#     contra o Emulator Suite, decisao explicita do usuario).
 #   - SEM Firebase/Java/Emulator Suite: os testes de `web/` sao Vitest +
-#     React Testing Library com `fetch`/Firebase Auth mockados (Epico 17.1
-#     do BACKLOG.md), propositalmente independentes de emulador rodando.
-#   - Nao e (ainda) um check obrigatorio de nenhuma branch protection,
-#     mesmo padrao de `ci-services.yml` (ver README.md > CI/CD e
-#     CONTRIBUTING.md) - o check obrigatorio de `main` continua sendo
-#     apenas `ci.yml` (functions/, Fase 1+2, em producao).
+#     React Testing Library com `fetch`/Firebase Auth mockados,
+#     propositalmente independentes de emulador rodando.
+#   - Nao e um check obrigatorio de branch protection - o check
+#     obrigatorio de `main` e `ci-services.yml` (ver CONTRIBUTING.md).
 #
 # NENHUM DEPLOY e feito por este workflow.
 

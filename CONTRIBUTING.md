@@ -16,7 +16,7 @@ Usamos **GitHub Flow**, um fluxo simples de branch única de longa duração:
    Exemplos: `feat/produtos-crud`, `fix/status-pedido-cancelado`, `docs/readme-deploy`, `chore/ci-lint`.
 3. Faça commits pequenos e frequentes na branch, seguindo a convenção da seção 2.
 4. Abra um **Pull Request** para `main` assim que houver algo revisável (PRs de rascunho/`draft` são bem-vindos para feedback antecipado).
-5. O PR só pode ser mesclado depois que os checks obrigatórios de CI (lint + testes contra o Emulator Suite — ver `.github/workflows/ci.yml`) passarem.
+5. O PR só pode ser mesclado depois que os checks obrigatórios de CI (lint + testes dos 3 microsserviços contra o Emulator Suite — ver `.github/workflows/ci-services.yml`) passarem.
 6. Após o merge, a branch de feature é apagada. `main` permanece sempre no estado que pode, em princípio, ser implantado (ver `README.md` > "Deploy").
 
 > Configuração de branch protection (GitHub) recomendada para `main` (Task 4.1.1/4.1.3, aplicada manualmente nas configurações do repositório GitHub, fora do escopo de arquivos versionados): exigir Pull Request antes de merge, exigir que o check `CI` esteja verde, e desabilitar push direto/force-push em `main`.
@@ -69,19 +69,19 @@ Regras práticas:
 
 ## 4. Antes de abrir o PR (checklist local)
 
-```bash
-cd functions
-npm run lint          # ESLint + regras TypeScript
-npm run format:check  # Prettier (use `npm run format` para corrigir)
-npm run build          # TypeScript compila sem erros
-npm run test:emulator  # suíte Jest+Supertest contra o Firebase Emulator Suite
-```
+Repita para cada serviço tocado pela mudança (`services/orders`, `services/payments`, `services/notifications`; `web/` se aplicável):
 
-Nota sobre o estado atual do repositório (ver `README.md` > "Estado atual do projeto"): a suíte de testes está em estado "vermelho" esperado (TDD) até a implementação do Módulo 2 (Core Business) do `BACKLOG.md`. Isso é esperado nesta fase e não deve bloquear commits de infraestrutura/documentação.
+```bash
+cd services/orders   # ou payments / notifications / web
+npm run lint                     # ESLint + regras TypeScript
+npm run format:check             # Prettier (use `npm run format` para corrigir)
+npm run build                    # TypeScript compila sem erros
+npm run test:coverage:emulator   # suíte Jest+Supertest contra o Firebase Emulator Suite
+```
 
 ## 5. Hook de pre-commit (Task 1.3.2)
 
-O repositório versiona um hook em `.husky/pre-commit` que roda `npm run lint` antes de cada commit e bloqueia o commit se houver erro de lint. Como hooks do Git não são ativados automaticamente ao clonar, rode uma vez após clonar o repositório:
+O repositório versiona um hook em `.husky/pre-commit` que roda `npm run lint` nos 3 microsserviços + `web/` antes de cada commit e bloqueia o commit se houver erro de lint em qualquer um. Como hooks do Git não são ativados automaticamente ao clonar, rode uma vez após clonar o repositório:
 
 ```bash
 git config core.hooksPath .husky

@@ -1,19 +1,16 @@
 # === Dependências ===
 node_modules/
-functions/node_modules/
 
 # === Build / artefatos compilados ===
 # Anexado ao caminho a partir da raiz do repo (nunca `lib/` puro - isso
 # tambem casaria com pastas de codigo-fonte legitimas como web/src/lib/,
-# bug ja causado uma vez: ver commit de correcao na Fase 4).
-functions/lib/
+# bug ja causado uma vez).
 services/*/lib/
 dist/
 build/
 
 # === Cobertura de testes ===
 coverage/
-functions/coverage/
 
 # === Firebase CLI / Emulator Suite ===
 .firebase/
@@ -24,10 +21,6 @@ firestore-debug.*.log
 ui-debug.log
 pubsub-debug.log
 database-debug.log
-functions/firebase-debug.log
-functions/firebase-debug.*.log
-functions/firestore-debug.log
-functions/firestore-debug.*.log
 *.emulator-data/
 emulator-data/
 
@@ -53,7 +46,7 @@ emulator-data/
 *serviceAccount*.json
 *service-account*.json
 *firebase-adminsdk*.json
-functions/.runtimeconfig.json
+.runtimeconfig.json
 .secrets/
 
 # === Editor / OS / agente local ===

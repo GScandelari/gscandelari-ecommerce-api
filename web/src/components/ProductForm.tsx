@@ -16,7 +16,7 @@ interface FieldErrors {
 /**
  * Task 16.1.2: validacao client-side minima espelhando (sem duplicar como
  * fonte de verdade) a validacao Zod ja existente no backend
- * (functions/src/schemas/produto.schema.ts): nome obrigatorio, preco > 0,
+ * (services/orders/src/schemas/produto.schema.ts): nome obrigatorio, preco > 0,
  * estoque inteiro >= 0.
  */
 function validate(data: ProdutoInput): FieldErrors {

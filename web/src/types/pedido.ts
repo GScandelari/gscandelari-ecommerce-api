@@ -37,7 +37,7 @@ export interface AlterarStatusInput {
 }
 
 /**
- * Espelha a maquina de estados de RN05/RN33 (functions/src/services/pedidos.statusMachine.ts)
+ * Espelha a maquina de estados de RN05/RN33 (services/orders/src/services/pedidos.statusMachine.ts)
  * apenas para restringir as opcoes exibidas na UI do Admin (Task 16.2.2) - a
  * validacao real da transicao permanece no backend (RN26). Fase 5: `enviado`
  * nao vai mais direto para `cancelado` - passa por `aguardando_devolucao`

@@ -1,42 +1,20 @@
-name: CI - Serviços (Fase 3)
+name: CI
 
-# Implementa a seção 4 "Requisitos de DevOps & Doc" da Fase 3 (SPEC.md) e o
-# item "Fora de escopo desta rodada (delegado ao devops-tech-writer)" da
-# seção Fase 3 do BACKLOG.md: lint/build/test independentes para cada um
-# dos 3 novos codebases (services/orders, services/payments,
-# services/notifications), SEM afetar `ci.yml`/`deploy.yml` — esses dois
-# continuam cuidando exclusivamente de `functions/` (Fase 1+2), hoje
-# deployado e servindo tráfego real em produção.
+# Lint, build e testes (Jest + Supertest contra o Firebase Emulator Suite)
+# para cada um dos 3 microsservicos que compoem a API (services/orders,
+# services/payments, services/notifications), rodando em matrix job. Este
+# e o check obrigatorio de branch protection em `main` (ver
+# CONTRIBUTING.md) - dispara em todo Pull Request e todo push para `main`,
+# sem filtro de path, para que o check sempre exista independente do que
+# o PR tenha tocado.
 #
-# Estado atual: os 3 serviços estão implementados e mesclados em `main`
-# (PR #1) — lint/build/test verdes nos 3 codebases. Ele NÃO é (ainda) um
-# check obrigatório de nenhuma branch protection, e sua falha não bloqueia
-# `ci.yml`/`deploy.yml` nem a branch `main` (que continua protegida só pelo
-# check de `ci.yml`, ver CONTRIBUTING.md).
-#
-# NENHUM DEPLOY é feito por este workflow. O deploy real dos novos
-# codebases (Épico 8.6 do BACKLOG.md — corte de produção) é a última etapa
-# da Fase 3 e exige aprovação explícita do usuário antes de qualquer
-# execução; um workflow de deploy dedicado só será criado quando essa
-# etapa for de fato disparada. Ver README.md > "Arquitetura da Fase 3
-# (Microsserviços) — em desenvolvimento" > "Corte de produção" para o
-# passo a passo completo.
+# NENHUM DEPLOY e feito por este workflow - ver `deploy-services.yml`.
 
 on:
   push:
-    # `feat/fase-3-microservicos` foi mesclada e deletada (PR #1) - `main`
-    # e o unico branch de push relevante desde entao. Sem isso, mudancas em
-    # services/** direto em `main` (ex.: fix(webhooks) pos-Fase 4) nunca
-    # disparavam este workflow.
     branches: [main]
-    paths:
-      - "services/**"
-      - ".github/workflows/ci-services.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "services/**"
-      - ".github/workflows/ci-services.yml"
   workflow_dispatch:
 
 jobs:
