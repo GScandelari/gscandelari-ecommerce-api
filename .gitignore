@@ -44,6 +44,12 @@ emulator-data/
 # valida, testes mockam rede) - necessario para `npm test`/CI rodar sem
 # depender de um .env local (ver web/.env.test para o porque de cada valor).
 !.env.test
+# services/{orders,payments}/.env.gscandelari-ecommerce-api: convencao
+# nativa do Firebase Functions 2a geracao (.env.<project-id>, carregado so
+# quando o deploy/runtime alvo e esse projeto real - nunca no emulador).
+# Conteudo e so URLs internas + e-mail de service account, nunca segredo
+# (Epico 8.6 do BACKLOG.md) - por isso e seguro versionar.
+!.env.gscandelari-ecommerce-api
 *serviceAccount*.json
 *service-account*.json
 *firebase-adminsdk*.json
