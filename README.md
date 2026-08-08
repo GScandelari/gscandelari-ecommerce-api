@@ -4,7 +4,7 @@ API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, 
 
 Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
-> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **implementada e mesclada em `main`** (código + testes verdes), mas **ainda não deployada em produção real** — decisão deliberada do usuário. Fase 4 (front-end de testes, `web/`) está implementada. Fase 5 (cancelamento pós-pagamento e reembolso) está implementada e mesclada em `main`. A **produção real não foi alterada** desde a Fase 2 (a correção de bug e as novas regras da Fase 5 em `functions/` ainda não foram deployadas — decisão pendente do usuário): o monólito `functions/` (codebase `default`) continua deployado e servindo 100% do tráfego real (inclusive o webhook do Stripe) sem interrupção, até o corte de produção da Fase 3 ser deliberadamente executado. Ver [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços) abaixo.
+> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **implementada e mesclada em `main`** (código + testes verdes), mas **ainda não deployada em produção real** — decisão deliberada do usuário. Fase 4 (front-end de testes, `web/`) está implementada. Fase 5 (cancelamento pós-pagamento e reembolso, e a correção do bug do webhook) está **implementada, deployada e validada de ponta a ponta em produção real** (modo teste do Stripe). O monólito `functions/` (codebase `default`) continua sendo o único deployado, servindo 100% do tráfego real, até o corte de produção da Fase 3 ser deliberadamente executado. Ver [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços) abaixo.
 
 ## Estado atual do projeto
 
@@ -19,7 +19,7 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 
 **Fase 3 (microsserviços): implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); todos sobem juntos no Emulator Suite e passam no CI (`ci-services.yml`). A produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual (`default`) — o corte de produção (Épico 8.6 do `BACKLOG.md`) fica pendente até o usuário decidir promover o projeto. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços).
 
-**Fase 5 (cancelamento pós-pagamento e reembolso): implementada e mesclada em `main`; ainda não deployada em produção real, por decisão pendente do usuário.** Emenda RN05/RN06/RN07 (Fase 1) e o modelo de pagamento (Fase 2) para permitir que o Cliente cancele também um pedido `confirmado`, introduz o status intermediário `aguardando_devolucao` para cancelamento a partir de `enviado`, e adiciona uma ação dedicada de reembolso via Stripe para o Admin (RN28-RN33) — sempre manual e deliberada, nunca automática. Também corrige um bug real encontrado testando a Fase 4 de ponta a ponta: o webhook do Stripe (`POST /webhooks/stripe`) nunca validava a assinatura corretamente através do Functions Framework (`req.body` já vinha parseado, não cru) — corrigido usando `req.rawBody`. `functions/` (92 testes), `services/orders`+`services/payments` (93+33 testes, réplica sem deploy) e `web/` (37 testes) todos verdes. Documentação da máquina de estados estendida está na seção [Máquina de estados do Pedido — status e pagamento](#máquina-de-estados-do-pedido--status-e-pagamento) abaixo.
+**Fase 5 (cancelamento pós-pagamento e reembolso): implementada, deployada e validada de ponta a ponta em produção real.** Emenda RN05/RN06/RN07 (Fase 1) e o modelo de pagamento (Fase 2) para permitir que o Cliente cancele também um pedido `confirmado`, introduz o status intermediário `aguardando_devolucao` para cancelamento a partir de `enviado`, e adiciona uma ação dedicada de reembolso via Stripe para o Admin (RN28-RN33) — sempre manual e deliberada, nunca automática. Também corrige um bug real encontrado testando a Fase 4 de ponta a ponta: o webhook do Stripe (`POST /webhooks/stripe`) nunca validava a assinatura corretamente através do Functions Framework (`req.body` já vinha parseado, não cru) — corrigido usando `req.rawBody`. `functions/` (92 testes), `services/orders`+`services/payments` (93+33 testes, réplica sem deploy) e `web/` (37 testes) todos verdes. Validado com uma compra real em modo teste do Stripe: criar → pagar → confirmar automaticamente via webhook → cancelar → reembolsar, com o refund conferido diretamente na API do Stripe (ver [Deploy](#deploy) para os pré-requisitos de infraestrutura descobertos nessa validação). Documentação da máquina de estados estendida está na seção [Máquina de estados do Pedido — status e pagamento](#máquina-de-estados-do-pedido--status-e-pagamento) abaixo.
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -221,16 +221,28 @@ Workflows em `.github/workflows/`:
 
 ## Deploy
 
-### Estado atual: projeto real provisionado, CD automatizado validado, Fase 1 + Fase 2 no ar
+### Estado atual: projeto real provisionado, CD automatizado validado, Fases 1, 2 e 5 no ar
 
 - **Projeto Firebase (Blaze):** `gscandelari-ecommerce-api` ([console](https://console.firebase.google.com/project/gscandelari-ecommerce-api/overview)), alias `production` em `.firebaserc`.
-- **Function URL:** `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api` (`/health`, `/docs`, `/produtos`, `/pedidos`, `/webhooks/stripe`).
+- **Function URL:** `https://us-central1-gscandelari-ecommerce-api.cloudfunctions.net/api` (`/health`, `/docs`, `/produtos`, `/pedidos`, `/webhooks/stripe`, `/pedidos/:id/reembolsar`).
 - **Política de limpeza do Artifact Registry** configurada (`firebase functions:artifacts:setpolicy`, imagens de container antigas removidas após 1 dia) — evita custo de armazenamento acumulado.
-- **Deploy via GitHub Actions validado de ponta a ponta** (`workflow_dispatch`, secret `FIREBASE_SERVICE_ACCOUNT_KEY` configurado): lint, build, testes contra o Emulator Suite e `firebase deploy --only functions` reais, do runner do GitHub até o projeto Firebase real.
+- **Deploy via GitHub Actions validado de ponta a ponta** (`workflow_dispatch`, secret `FIREBASE_SERVICE_ACCOUNT_KEY` configurado): lint, build, testes contra o Emulator Suite e `firebase deploy --only functions:default` reais, do runner do GitHub até o projeto Firebase real — escopo explícito ao codebase `default` desde a Fase 5 (ver nota abaixo).
 - **Branch protection** ativa em `main` (PR obrigatório + check de CI obrigatório).
-- Segredos do Stripe (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, modo teste) configurados no Firebase Secret Manager — Fase 2 deployada e validada (webhook responde 400 sem assinatura, conforme esperado).
+- Segredos do Stripe (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, modo teste) configurados no Firebase Secret Manager — Fase 2 deployada.
+- **Fase 5 (cancelamento/reembolso + correção do bug do webhook) validada de ponta a ponta em produção real** (modo teste do Stripe): pedido criado → PaymentIntent real → pago via cartão de teste → webhook real confirmou o pedido automaticamente (`confirmado`/`pago`) → cancelado (`estorno_pendente`) → reembolsado via `PATCH /pedidos/:id/reembolsar`, refund `succeeded` conferido diretamente na API do Stripe. Dados de teste usados nessa validação foram removidos depois (produto, pedido, usuários).
 
 **Papéis da Service Account de deploy** (`github-actions-deploy@gscandelari-ecommerce-api.iam.gserviceaccount.com`), descobertos por tentativa/erro real contra o deploy (a lista abaixo é o mínimo que efetivamente funcionou, não uma lista teórica): Cloud Functions Admin, Cloud Run Admin, Artifact Registry Administrator, Cloud Build Editor, Service Account User, Firebase Admin, Service Usage Admin (necessário para o deploy habilitar `cloudbilling.googleapis.com` sozinho), Secret Manager Secret Accessor e Secret Manager Admin (necessário para o deploy conceder acesso ao secret para a service account de runtime das Functions).
+
+### Pré-requisitos de provisionamento descobertos na validação da Fase 5 (passo único, manual, via Console)
+
+O deploy de *código* (`deploy.yml`) sempre funcionou desde a Fase 1, mas até a validação de ponta a ponta da Fase 5 **nenhuma chamada de produção real que tocasse o Firestore havia sido testada** (os smoke tests anteriores só cobriam `/health`/`/docs`, que não tocam o banco). Isso escondeu quatro passos de provisionamento que o Console do Firebase nunca executa sozinho e que faltavam no projeto real:
+
+1. **Firebase Authentication nunca tinha sido habilitado** — sem isso, todo endpoint autenticado (RN09) falha antes mesmo de chegar no Firestore. Habilitar em Console > Authentication > "Get started" > provedor **Email/senha**.
+2. **Cloud Firestore API nunca tinha sido habilitada** no projeto GCP — retorna `PERMISSION_DENIED`/`SERVICE_DISABLED` até ser ativada em [console.developers.google.com/apis/api/firestore.googleapis.com](https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=gscandelari-ecommerce-api).
+3. **O banco de dados Firestore em si nunca tinha sido criado** (habilitar a API e criar o banco são passos distintos) — em Console > Firestore Database > "Create database", modo **Native**, região **us-central1** (mesma região da Cloud Function). **Importante:** o ID do banco deve ficar literalmente `(default)` — o Admin SDK usado por `functions/src/firebaseAdmin.ts` só enxerga esse nome sem configuração adicional; um ID customizado (ex. `gscandelari-db`) causa `NOT_FOUND` silencioso (500 genérico na API, sem mensagem clara pro cliente).
+4. **`firestore.rules`/`firestore.indexes.json` nunca tinham sido deployados** para produção (só existiam localmente/no emulador) — rodar `firebase deploy --only firestore --project production` uma vez resolve; o Admin SDK (usado por toda a API) ignora as rules de qualquer forma, mas deployá-las fecha o acesso via Client SDK, que é a postura de segurança pretendida (Task 1.1.3).
+
+Nenhum destes é necessário para os Emulators locais (que já vêm com Auth/Firestore prontos por padrão) — só para uma instância real do zero.
 
 ### Decisão registrada (Task 4.5.1 do `BACKLOG.md`): deploy MANUAL
 
@@ -240,7 +252,7 @@ O deploy a partir de `main` é **manual**, disparado via `workflow_dispatch` (bo
 
 1. Garanta que `main` está com o CI verde (badge/check do workflow `ci.yml`).
 2. Vá em GitHub > Actions > workflow **"Deploy Firebase Functions"** > "Run workflow", selecione a branch `main`, digite `deploy` no campo de confirmação e execute.
-3. O workflow reexecuta lint + build + testes antes de deployar (defesa em profundidade) e então roda `firebase deploy --only functions`.
+3. O workflow reexecuta lint + build + testes antes de deployar (defesa em profundidade) e então roda `firebase deploy --only functions:default` — escopo explícito ao codebase `default` (Fase 1+2+5); sem isso, desde que `firebase.json` passou a declarar múltiplos codebases (Fase 3), um `--only functions` sem escopo deployaria também `orders`/`payments`/`notifications`, cujo corte de produção é deliberadamente separado (Épico 8.6, ver [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços)).
 
 ### Deploy manual via Firebase CLI (local)
 
@@ -249,7 +261,7 @@ cd functions
 npm run build
 npm run test:emulator          # garanta que a suíte passa antes de deployar
 cd ..
-npx firebase-tools deploy --only functions --project production
+npx firebase-tools deploy --only functions:default --project production
 ```
 
 Nunca rode `firebase deploy` apontando para o alias `default`/demo — ele existe apenas para os emuladores.
@@ -315,7 +327,7 @@ Passo **manual**, feito uma vez por ambiente (dev local com túnel/Stripe CLI, e
 
 ## Máquina de estados do Pedido — status e pagamento
 
-`status` (`PedidoStatus`) e `paymentStatus` (`PaymentStatus`) são dois campos independentes do mesmo documento `Pedido`. RN05/RN06/RN07/RN07a (Fase 1, em produção) definem a máquina de `status`; RN10-RN15 (Fase 2, em produção) definem `paymentStatus`. **RN28-RN33 (Fase 5) estendem as duas** — implementadas e mescladas em `main`, mas **ainda não deployadas em produção real** (decisão pendente do usuário, ver "Estado atual do projeto" acima): os trechos marcados abaixo como "Fase 5" já existem no código de `functions/` mas ainda não estão servindo tráfego real.
+`status` (`PedidoStatus`) e `paymentStatus` (`PaymentStatus`) são dois campos independentes do mesmo documento `Pedido`. RN05/RN06/RN07/RN07a (Fase 1, em produção) definem a máquina de `status`; RN10-RN15 (Fase 2, em produção) definem `paymentStatus`. **RN28-RN33 (Fase 5) estendem as duas** — implementadas, deployadas e validadas de ponta a ponta em produção real (ver "Estado atual do projeto" acima).
 
 ### `status` do Pedido (`PedidoStatus`)
 
@@ -330,13 +342,13 @@ Cancelamento, hoje em produção (Fase 1, RN05/RN06/RN07/RN07a):
 - `confirmado → cancelado` — somente Admin; estoque **não** é restaurado automaticamente (RN07a).
 - `enviado → cancelado` — somente Admin; estoque **não** é restaurado automaticamente (RN07a).
 
-**Fase 5 (implementada, ainda não deployada em produção real)** — RN28/RN29/RN30/RN33 alteram esse quadro:
+**Fase 5 (implementada e em produção)** — RN28/RN29/RN30/RN33 alteram esse quadro:
 - `confirmado → cancelado` passa a também poder ser disparada pelo **Cliente** dono do pedido (RN28; hoje só o Admin pode). Quando é o Cliente quem cancela um `confirmado`, o estoque **é** restaurado (RN28); quando é o **Admin** quem cancela um `confirmado`, o estoque continua **não** sendo restaurado (RN07a inalterado para o Admin — assimetria Cliente/Admin deliberada, ver Decisão técnica 3 do `BACKLOG.md`/Fase 5).
 - `enviado → cancelado` deixa de existir como transição direta (tanto para o Cliente quanto para o Admin). Em seu lugar entra o novo status intermediário `aguardando_devolucao`, sinalizando que o produto ainda está fisicamente com o cliente:
   - `enviado → aguardando_devolucao` — Cliente dono ou Admin (RN29); nenhuma restauração de estoque nem mudança de `paymentStatus` nesta transição (o pedido ainda não está `cancelado`).
   - `aguardando_devolucao → cancelado` — **somente Admin**, confirmando que o produto retornou fisicamente (RN30); estoque restaurado (mesma lógica de RN07a).
 
-Diagrama textual, já incluindo a extensão da Fase 5 (itens marcados `[Fase 5]` já implementados no código, ainda não em produção real):
+Diagrama textual, já incluindo a extensão da Fase 5 (itens marcados `[Fase 5]` já implementados e em produção):
 
 ```
 pendente
@@ -356,7 +368,7 @@ Hoje em produção (Fase 2, RN10-RN15):
 - `pago` — setado quando o webhook `payment_intent.succeeded` confirma o pagamento (RN12).
 - `falhou` — setado quando o webhook `payment_intent.payment_failed` (ou equivalente) é recebido (RN13); o pedido também é cancelado e o estoque restaurado nesse mesmo evento.
 
-**Fase 5 (implementada, ainda não deployada em produção real)** — RN31/RN32/RN33 adicionam dois novos valores:
+**Fase 5 (implementada e em produção)** — RN31/RN32/RN33 adicionam dois novos valores:
 - `estorno_pendente` — quando um pedido com `paymentStatus: "pago"` é cancelado por qualquer uma das transições acima que levam a `cancelado` (`confirmado → cancelado` pelo Cliente ou pelo Admin, ou `aguardando_devolucao → cancelado` pelo Admin), `paymentStatus` muda **automaticamente** para `estorno_pendente` (RN31). Essa mudança de `paymentStatus` é o único efeito automático do cancelamento sobre o pagamento — **nenhuma chamada ao Stripe é feita nesse momento**. Um pedido cancelado a partir de `pendente` nunca chega a `estorno_pendente` (ainda não havia cobrança confirmada nesse caso).
 - `reembolsado` — só é alcançado através de uma ação **dedicada, manual e exclusiva do Admin**: `PATCH /pedidos/:id/reembolsar` (admin-only, RN32), disponível apenas quando `paymentStatus === "estorno_pendente"`, chama `stripe.refunds.create` pelo valor total do pedido (`pedido.total`, sem reembolso parcial nesta fase). Sucesso → `paymentStatus: "reembolsado"` (o `status` do pedido, já `cancelado`, não muda). Falha na chamada ao Stripe → `paymentStatus` permanece `estorno_pendente` (permite nova tentativa), resposta HTTP 502 (`PaymentGatewayError`, mesmo padrão de RN10).
 
