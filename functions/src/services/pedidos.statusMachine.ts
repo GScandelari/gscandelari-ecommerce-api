@@ -1,10 +1,5 @@
 export type PedidoStatus =
-  | "pendente"
-  | "confirmado"
-  | "enviado"
-  | "entregue"
-  | "aguardando_devolucao"
-  | "cancelado";
+  "pendente" | "confirmado" | "enviado" | "entregue" | "aguardando_devolucao" | "cancelado";
 
 /**
  * Transicoes estruturalmente validas (RN05), independentes de quem as

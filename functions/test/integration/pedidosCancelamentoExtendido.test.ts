@@ -2,7 +2,11 @@
 // sobre "@/stripeClient" (helpers/mockStripe.ts) seja registrado antes de
 // qualquer modulo do Modulo 5/6/18/19/20 tentar carregar o cliente Stripe
 // real.
-import { mockPaymentIntentsCreate, mockWebhooksConstructEvent, resetStripeMocks } from "../helpers/mockStripe";
+import {
+  mockPaymentIntentsCreate,
+  mockWebhooksConstructEvent,
+  resetStripeMocks,
+} from "../helpers/mockStripe";
 import request from "supertest";
 import app from "../../src/app";
 import { createTestUser, TestUser } from "../helpers/testAuth";
@@ -99,11 +103,7 @@ async function marcarComoPago(pedidoId: string, paymentIntentId: string): Promis
   }
 }
 
-async function alterarStatusAdmin(
-  adminUser: TestUser,
-  pedidoId: string,
-  status: string,
-) {
+async function alterarStatusAdmin(adminUser: TestUser, pedidoId: string, status: string) {
   return request(app)
     .patch(`/pedidos/${pedidoId}/status`)
     .set("Authorization", `Bearer ${adminUser.idToken}`)

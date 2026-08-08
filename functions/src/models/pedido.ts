@@ -14,11 +14,7 @@ export interface ItemPedido {
  * reembolso (`PATCH /pedidos/:id/reembolsar`).
  */
 export type PaymentStatus =
-  | "aguardando_pagamento"
-  | "pago"
-  | "falhou"
-  | "estorno_pendente"
-  | "reembolsado";
+  "aguardando_pagamento" | "pago" | "falhou" | "estorno_pendente" | "reembolsado";
 
 export interface Pedido {
   id: string;

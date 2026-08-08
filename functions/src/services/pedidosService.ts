@@ -176,7 +176,12 @@ export async function alterarStatusAdmin(
       paymentStatus = determinarPaymentStatusAoCancelar(pedido.paymentStatus);
     }
 
-    const data: PedidoInput = { ...pedido, status: novoStatus, paymentStatus, updatedAt: new Date() };
+    const data: PedidoInput = {
+      ...pedido,
+      status: novoStatus,
+      paymentStatus,
+      updatedAt: new Date(),
+    };
     tx.set(pedidoRef, data);
     return { id: pedidoRef.id, ...data };
   });
@@ -220,7 +225,11 @@ export async function cancelarPedidoCliente(pedidoId: string, clienteId: string)
     }
 
     if (pedido.status === "enviado") {
-      const data: PedidoInput = { ...pedido, status: "aguardando_devolucao", updatedAt: new Date() };
+      const data: PedidoInput = {
+        ...pedido,
+        status: "aguardando_devolucao",
+        updatedAt: new Date(),
+      };
       tx.set(pedidoRef, data);
       return { id: pedidoRef.id, ...data };
     }
