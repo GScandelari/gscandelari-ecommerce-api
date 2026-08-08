@@ -1,13 +1,435 @@
-<!doctype html>
-<html lang="pt-br">
-  <head>
-    <meta charset="utf-8" />
-    <title>gscandelari-ecommerce-api</title>
-  </head>
-  <body>
-    <p>
-      Este dominio serve apenas como API Gateway (Firebase Hosting rewrites) para os servicos
-      Orders e Payments. Ver <code>/docs</code> para a documentacao interativa (Swagger UI).
-    </p>
-  </body>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="API REST de e-commerce em arquitetura de microsserviços — Firebase, TypeScript, Stripe. Projeto de portfólio de Guilherme Scandelari." />
+  <title data-i18n="page.title">gscandelari-ecommerce-api — API de E-commerce em Microsserviços</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon" href="favicon/favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon/favicon-16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon/favicon-32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="favicon/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="favicon/android-chrome-192x192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="favicon/android-chrome-512x512.png">
+  <link rel="manifest" href="favicon/site.webmanifest">
+
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+  <link rel="stylesheet" href="/css/tailwind.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    html { scroll-behavior: smooth; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .gradient-text {
+      background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .card-hover {
+      transition: transform .25s ease, box-shadow .25s ease;
+    }
+    .card-hover:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 32px rgba(59,130,246,.15);
+    }
+    .nav-link {
+      position: relative;
+    }
+    .nav-link::after {
+      content: '';
+      position: absolute;
+      bottom: -2px;
+      left: 0;
+      width: 0;
+      height: 2px;
+      background: #3B82F6;
+      transition: width .25s ease;
+    }
+    .nav-link:hover::after { width: 100%; }
+
+    /* Fixed background monogram */
+    body::before {
+      content: '{ }';
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Inter', monospace;
+      font-weight: 700;
+      font-size: min(46vw, 620px);
+      line-height: 1;
+      color: #3B82F6;
+      opacity: 0.04;
+      pointer-events: none;
+      z-index: 0;
+      white-space: nowrap;
+    }
+
+    /* Ensure content is above background */
+    body > * {
+      position: relative;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body class="bg-gray-950 text-white font-sans antialiased">
+
+  <!-- ── NAVBAR ─────────────────────────────────────────────── -->
+  <nav class="fixed top-0 inset-x-0 z-50 bg-gray-950/80 backdrop-blur border-b border-white/5">
+    <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-2 font-semibold tracking-tight text-white">
+        <i class="fas fa-cart-shopping text-blue-400"></i>
+        <span class="hidden sm:inline">gscandelari-ecommerce-api</span>
+        <span class="sm:hidden">ecommerce-api</span>
+      </a>
+      <div class="hidden md:flex items-center gap-6 text-sm text-gray-400">
+        <a href="#sobre" class="nav-link hover:text-white transition-colors" data-i18n="nav.about">Sobre</a>
+        <a href="#arquitetura" class="nav-link hover:text-white transition-colors" data-i18n="nav.architecture">Arquitetura</a>
+        <a href="#funcionalidades" class="nav-link hover:text-white transition-colors" data-i18n="nav.features">Funcionalidades</a>
+        <a href="#stack" class="nav-link hover:text-white transition-colors" data-i18n="nav.stack">Stack</a>
+        <a href="#explorar" class="nav-link hover:text-white transition-colors" data-i18n="nav.explore">Explorar</a>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="lang-toggle" class="text-xs font-semibold text-gray-400 hover:text-white transition-colors border border-white/10 hover:border-white/20 px-2.5 py-1 rounded-md">EN</button>
+        <a href="/docs"
+           class="text-sm bg-blue-600 hover:bg-blue-500 transition-colors px-4 py-2 rounded-lg font-medium"
+           data-i18n="nav.cta">
+          Documentação
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── HERO ──────────────────────────────────────────────── -->
+  <section class="min-h-screen flex items-center pt-16">
+    <div class="max-w-5xl mx-auto px-6 py-24 w-full">
+      <div class="max-w-3xl animate-slide-up">
+        <span class="inline-block text-xs font-semibold tracking-widest text-blue-400 uppercase mb-4" data-i18n="hero.eyebrow">
+          Projeto de Portfólio · API REST
+        </span>
+        <h1 class="text-5xl lg:text-6xl font-bold leading-tight mb-6">
+          <span data-i18n="hero.heading.before">API de </span><span class="gradient-text" data-i18n="hero.heading.gradient">E-commerce</span>
+        </h1>
+        <p class="text-gray-400 text-lg leading-relaxed mb-8 max-w-2xl" data-i18n="hero.desc">
+          Backend REST completo de e-commerce — catálogo, pedidos, pagamento real (modo teste) via Stripe,
+          cancelamento e reembolso, notificações por e-mail — construído em arquitetura de microsserviços
+          sobre o Firebase, com testes automatizados e deploy contínuo.
+        </p>
+
+        <!-- CTA buttons -->
+        <div class="flex flex-wrap gap-4 mb-10">
+          <a href="/docs"
+             class="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 transition-colors px-5 py-3 rounded-xl font-medium text-sm">
+            <i class="fas fa-book"></i> <span data-i18n="hero.cta.docs">Ver documentação (Swagger)</span>
+          </a>
+          <a href="https://github.com/GScandelari/gscandelari-ecommerce-api" target="_blank" rel="noopener noreferrer"
+             class="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all px-5 py-3 rounded-xl font-medium text-sm">
+            <i class="fab fa-github text-lg"></i> <span data-i18n="hero.cta.github">Ver código no GitHub</span>
+          </a>
+        </div>
+
+        <!-- Tech badges -->
+        <div class="flex flex-wrap gap-2">
+          <span class="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full text-xs text-blue-400 font-medium">TypeScript</span>
+          <span class="px-3 py-1 bg-orange-500/10 border border-orange-500/20 rounded-full text-xs text-orange-400 font-medium">Firebase Cloud Functions</span>
+          <span class="px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full text-xs text-green-400 font-medium">Express</span>
+          <span class="px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full text-xs text-purple-400 font-medium">Stripe</span>
+          <span class="px-3 py-1 bg-cyan-500/10 border border-cyan-500/20 rounded-full text-xs text-cyan-400 font-medium">Firestore</span>
+          <span class="px-3 py-1 bg-pink-500/10 border border-pink-500/20 rounded-full text-xs text-pink-400 font-medium">Microsserviços</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SOBRE ─────────────────────────────────────────────── -->
+  <section id="sobre" class="py-24 border-t border-white/5">
+    <div class="max-w-5xl mx-auto px-6">
+      <h2 class="text-3xl font-bold mb-3"><span data-i18n="about.heading.before">Sobre o </span><span class="gradient-text" data-i18n="about.heading.gradient">projeto</span></h2>
+      <p class="text-gray-500 mb-12 text-sm uppercase tracking-widest" data-i18n="about.subtitle">O que é isso</p>
+
+      <div class="grid lg:grid-cols-2 gap-12 items-start">
+        <div class="space-y-4 text-gray-400 leading-relaxed">
+          <p data-i18n-html="about.p1">
+            Este é um projeto de portfólio — uma API de e-commerce real, com regras de negócio completas
+            (não um CRUD de exemplo): estoque decrementado transacionalmente, máquina de estados de pedido,
+            pagamento real em modo teste do Stripe com confirmação via webhook assinado, cancelamento e
+            reembolso deliberados, e notificação por e-mail ao cliente.
+          </p>
+          <p data-i18n-html="about.p2">
+            Construído incrementalmente com <strong class="text-white">TDD</strong> (testes escritos antes da
+            implementação), cobertura de testes acima de 70% em cada serviço, CI obrigatório em toda mudança
+            e deploy manual (nunca automático) para o projeto Firebase real, sempre em modo teste/sandbox —
+            este projeto nunca processa dinheiro real.
+          </p>
+          <p data-i18n-html="about.p3">
+            A arquitetura é composta por <strong class="text-white">três microsserviços independentes</strong>
+            atrás de um API Gateway, com comunicação interna autenticada via ID token do Google — decisão
+            deliberada para demonstrar domínio de padrões de sistemas distribuídos, não só de CRUD.
+          </p>
+        </div>
+
+        <!-- Stats cards -->
+        <div class="grid grid-cols-2 gap-4">
+          <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+            <div class="text-4xl font-bold gradient-text mb-1">3</div>
+            <div class="text-gray-400 text-sm" data-i18n="about.stat.services">Microsserviços independentes</div>
+          </div>
+          <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+            <div class="text-4xl font-bold gradient-text mb-1">170+</div>
+            <div class="text-gray-400 text-sm" data-i18n="about.stat.tests">Testes automatizados</div>
+          </div>
+          <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+            <div class="text-4xl font-bold gradient-text mb-1">100%</div>
+            <div class="text-gray-400 text-sm" data-i18n="about.stat.typescript">TypeScript</div>
+          </div>
+          <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+            <div class="text-4xl font-bold gradient-text mb-1">33+</div>
+            <div class="text-gray-400 text-sm" data-i18n="about.stat.rules">Regras de negócio (RNs)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── ARQUITETURA ────────────────────────────────────────── -->
+  <section id="arquitetura" class="py-24 border-t border-white/5">
+    <div class="max-w-5xl mx-auto px-6">
+      <h2 class="text-3xl font-bold mb-3"><span data-i18n="arch.heading.before">Como </span><span class="gradient-text" data-i18n="arch.heading.gradient">funciona</span></h2>
+      <p class="text-gray-500 mb-12 text-sm uppercase tracking-widest" data-i18n="arch.subtitle">Arquitetura de microsserviços</p>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+
+        <div class="bg-gradient-to-br from-blue-900/20 to-purple-900/20 border border-blue-500/20 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-diagram-project text-blue-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="arch.gateway.title">API Gateway</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="arch.gateway.desc">
+            Firebase Hosting como porta de entrada única, roteando cada path para o serviço correto.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-boxes-stacked text-green-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="arch.orders.title">Orders</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="arch.orders.desc">
+            Dono exclusivo de produtos e pedidos. Estoque transacional, máquina de estados, cancelamento.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-credit-card text-purple-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="arch.payments.title">Payments</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="arch.payments.desc">
+            Toda a integração com o Stripe: PaymentIntent, webhook assinado, reembolso.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-cyan-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-envelope text-cyan-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="arch.notifications.title">Notifications</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="arch.notifications.desc">
+            Reage a mudanças de status via Firestore Trigger e envia e-mail — sem rota HTTP pública.
+          </p>
+        </div>
+
+      </div>
+
+      <div class="mt-8 bg-white/3 border border-white/8 rounded-2xl p-6">
+        <p class="text-gray-400 text-sm leading-relaxed" data-i18n-html="arch.note">
+          Orders e Payments se comunicam de forma síncrona via HTTP interno, autenticado com ID token
+          assinado pelo Google — cada serviço roda sob sua própria service account de runtime, com o
+          mínimo de permissão IAM necessária. Notifications é assíncrono e best-effort: uma falha de
+          e-mail nunca reverte uma transição de pedido já efetivada.
+          <a href="https://github.com/GScandelari/gscandelari-ecommerce-api#arquitetura" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 transition-colors">Ver diagrama completo →</a>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FUNCIONALIDADES ────────────────────────────────────── -->
+  <section id="funcionalidades" class="py-24 border-t border-white/5">
+    <div class="max-w-5xl mx-auto px-6">
+      <h2 class="text-3xl font-bold mb-3"><span data-i18n="features.heading.before">Regras de </span><span class="gradient-text" data-i18n="features.heading.gradient">negócio</span></h2>
+      <p class="text-gray-500 mb-12 text-sm uppercase tracking-widest" data-i18n="features.subtitle">O que a API faz</p>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-tags text-blue-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="feature1.title">Catálogo de Produtos</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="feature1.desc">
+            CRUD completo, admin-only para escrita, validação com Zod.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-clipboard-list text-green-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="feature2.title">Pedidos & Estoque</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="feature2.desc">
+            Criação com decremento transacional de estoque e máquina de estados completa.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-money-check-dollar text-purple-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="feature3.title">Pagamento Real (modo teste)</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="feature3.desc">
+            PaymentIntent do Stripe por pedido, confirmação via webhook assinado, idempotente.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-orange-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-rotate-left text-orange-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="feature4.title">Cancelamento & Reembolso</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="feature4.desc">
+            Cancelamento pelo Cliente ou Admin conforme o estado; reembolso sempre manual e deliberado.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-cyan-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-bell text-cyan-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="feature5.title">Notificações por E-mail</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="feature5.desc">
+            E-mail ao cliente na confirmação/cancelamento do pedido — best-effort, nunca bloqueia.
+          </p>
+        </div>
+
+        <div class="bg-white/3 border border-white/8 rounded-2xl p-6 card-hover">
+          <div class="w-12 h-12 bg-pink-500/10 rounded-xl flex items-center justify-center mb-4">
+            <i class="fas fa-shield-halved text-pink-400 text-xl"></i>
+          </div>
+          <h3 class="font-semibold text-white mb-2" data-i18n="feature6.title">Autenticação & Autorização</h3>
+          <p class="text-gray-400 text-sm leading-relaxed" data-i18n="feature6.desc">
+            Firebase Auth com custom claim <code>admin</code> — fonte real de verdade no backend.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── STACK ──────────────────────────────────────────────── -->
+  <section id="stack" class="py-24 border-t border-white/5">
+    <div class="max-w-5xl mx-auto px-6">
+      <h2 class="text-3xl font-bold mb-3"><span data-i18n="stack.heading.before">Stack </span><span class="gradient-text" data-i18n="stack.heading.gradient">tecnológica</span></h2>
+      <p class="text-gray-500 mb-12 text-sm uppercase tracking-widest" data-i18n="stack.subtitle">Ferramentas usadas</p>
+
+      <div class="flex flex-wrap gap-3">
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fab fa-js text-yellow-400"></i> TypeScript</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fas fa-fire text-orange-400"></i> Firebase Cloud Functions</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fab fa-node-js text-green-400"></i> Express</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fas fa-database text-cyan-400"></i> Firestore</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fab fa-stripe text-purple-400"></i> Stripe</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fas fa-paper-plane text-blue-300"></i> Resend</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fas fa-vial text-red-400"></i> Jest + Supertest</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fab fa-github text-white"></i> GitHub Actions</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fas fa-check-double text-emerald-400"></i> Zod</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fas fa-file-code text-indigo-400"></i> OpenAPI / Swagger</span>
+        <span class="px-4 py-2 bg-white/3 border border-white/8 rounded-xl text-sm text-gray-300 flex items-center gap-2"><i class="fab fa-react text-cyan-300"></i> React + Vite</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── EXPLORAR ───────────────────────────────────────────── -->
+  <section id="explorar" class="py-24 border-t border-white/5">
+    <div class="max-w-5xl mx-auto px-6">
+      <h2 class="text-3xl font-bold mb-3"><span data-i18n="explore.heading.before">Explore o </span><span class="gradient-text" data-i18n="explore.heading.gradient">projeto</span></h2>
+      <p class="text-gray-500 mb-12 text-sm uppercase tracking-widest" data-i18n="explore.subtitle">Documentação completa</p>
+
+      <div class="grid sm:grid-cols-2 gap-4">
+
+        <a href="/docs"
+           class="flex items-center gap-4 bg-blue-500/5 border border-blue-500/15 hover:border-blue-500/30 transition-all rounded-xl px-5 py-5 group card-hover">
+          <div class="w-11 h-11 bg-blue-500/10 rounded-xl flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-book text-blue-400 text-xl"></i>
+          </div>
+          <div>
+            <div class="text-white font-semibold text-sm" data-i18n="explore.docs.title">Documentação da API</div>
+            <div class="text-gray-500 text-xs" data-i18n="explore.docs.desc">Swagger UI interativo — /docs</div>
+          </div>
+          <i class="fas fa-arrow-right text-gray-600 group-hover:text-blue-400 transition-colors ml-auto text-sm"></i>
+        </a>
+
+        <a href="https://github.com/GScandelari/gscandelari-ecommerce-api" target="_blank" rel="noopener noreferrer"
+           class="flex items-center gap-4 bg-white/3 border border-white/8 hover:border-white/15 transition-all rounded-xl px-5 py-5 group card-hover">
+          <div class="w-11 h-11 bg-white/5 rounded-xl flex items-center justify-center flex-shrink-0">
+            <i class="fab fa-github text-white text-xl"></i>
+          </div>
+          <div>
+            <div class="text-white font-semibold text-sm" data-i18n="explore.github.title">Código-fonte</div>
+            <div class="text-gray-500 text-xs" data-i18n="explore.github.desc">Repositório completo no GitHub</div>
+          </div>
+          <i class="fas fa-arrow-up-right-from-square text-gray-600 group-hover:text-white transition-colors ml-auto text-sm"></i>
+        </a>
+
+        <a href="https://github.com/GScandelari/gscandelari-ecommerce-api/blob/main/SPEC.md" target="_blank" rel="noopener noreferrer"
+           class="flex items-center gap-4 bg-purple-500/5 border border-purple-500/15 hover:border-purple-500/30 transition-all rounded-xl px-5 py-5 group card-hover">
+          <div class="w-11 h-11 bg-purple-500/10 rounded-xl flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-file-lines text-purple-400 text-xl"></i>
+          </div>
+          <div>
+            <div class="text-white font-semibold text-sm" data-i18n="explore.spec.title">Especificação técnica</div>
+            <div class="text-gray-500 text-xs" data-i18n="explore.spec.desc">Todas as regras de negócio (SPEC.md)</div>
+          </div>
+          <i class="fas fa-arrow-up-right-from-square text-gray-600 group-hover:text-purple-400 transition-colors ml-auto text-sm"></i>
+        </a>
+
+        <a href="https://github.com/GScandelari/gscandelari-ecommerce-api/blob/main/BACKLOG.md" target="_blank" rel="noopener noreferrer"
+           class="flex items-center gap-4 bg-cyan-500/5 border border-cyan-500/15 hover:border-cyan-500/30 transition-all rounded-xl px-5 py-5 group card-hover">
+          <div class="w-11 h-11 bg-cyan-500/10 rounded-xl flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-list-check text-cyan-400 text-xl"></i>
+          </div>
+          <div>
+            <div class="text-white font-semibold text-sm" data-i18n="explore.backlog.title">Backlog de desenvolvimento</div>
+            <div class="text-gray-500 text-xs" data-i18n="explore.backlog.desc">Épicos, tasks e critérios de aceite</div>
+          </div>
+          <i class="fas fa-arrow-up-right-from-square text-gray-600 group-hover:text-cyan-400 transition-colors ml-auto text-sm"></i>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FOOTER ─────────────────────────────────────────────── -->
+  <footer class="border-t border-white/5 py-8">
+    <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <span class="text-gray-600 text-sm" data-i18n-html="footer.text">
+        Projeto de portfólio de <a href="https://gscandelari.com.br" target="_blank" rel="noopener noreferrer" class="text-gray-400 hover:text-white transition-colors">Guilherme Scandelari</a>
+      </span>
+      <div class="flex items-center gap-5 text-gray-600">
+        <a href="https://gscandelari.com.br" target="_blank" rel="noopener noreferrer"
+           class="hover:text-blue-400 transition-colors text-lg" title="Portfólio"><i class="fas fa-house"></i></a>
+        <a href="https://github.com/GScandelari" target="_blank" rel="noopener noreferrer"
+           class="hover:text-white transition-colors text-lg" title="GitHub"><i class="fab fa-github"></i></a>
+        <a href="https://www.linkedin.com/in/guilherme-stanke-scandelari/?locale=pt-BR" target="_blank" rel="noopener noreferrer"
+           class="hover:text-blue-400 transition-colors text-lg" title="LinkedIn"><i class="fab fa-linkedin"></i></a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/i18n.js" defer></script>
+</body>
 </html>

@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@source "../index.html";
+
+@theme {
+  --color-brand: #3B82F6;
+  --font-family-sans: Inter, system-ui, sans-serif;
+
+  --animate-fade-in:  fadeIn .6s ease both;
+  --animate-slide-up: slideUp .6s ease both;
+  --animate-float:    float 4s ease-in-out infinite;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-14px); }
+}

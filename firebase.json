@@ -46,7 +46,7 @@
   },
   "hosting": {
     "public": "public",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "**/*.md", "**/package*.json"],
     "rewrites": [
       { "source": "/produtos/**", "function": "ordersApi" },
       { "source": "/pedidos/**", "function": "ordersApi" },

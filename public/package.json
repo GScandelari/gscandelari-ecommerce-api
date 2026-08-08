@@ -1,0 +1,14 @@
+{
+  "name": "gscandelari-ecommerce-api-hosting",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Página institucional do projeto (Firebase Hosting), servida como raiz do API Gateway.",
+  "scripts": {
+    "build:css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "tailwindcss": "^4.2.2"
+  }
+}
