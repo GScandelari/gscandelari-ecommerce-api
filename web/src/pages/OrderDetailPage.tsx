@@ -5,7 +5,13 @@ import { ApiError } from "@/api/apiClient";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import type { Pedido } from "@/types/pedido";
 
-/** RN24: detalhe de um pedido do cliente logado, com cancelamento se ainda `pendente`. */
+/**
+ * RN24: detalhe de um pedido do cliente logado, com cancelamento.
+ * Fase 5 (RN28/RN29): o botão de cancelar passa a aparecer também em
+ * `confirmado` (cancela direto) e `enviado` (aguarda confirmação de
+ * devolução antes de virar `cancelado` de verdade) - a decisão de qual dos
+ * dois destinos é usada é sempre do backend, nunca replicada aqui.
+ */
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -92,15 +98,24 @@ export function OrderDetailPage() {
         </div>
       )}
 
-      {pedido.status === "pendente" && (
-        <button
-          type="button"
-          disabled={cancelando}
-          onClick={handleCancelar}
-          className="mt-4 rounded border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
-        >
-          {cancelando ? "Cancelando..." : "Cancelar pedido"}
-        </button>
+      {["pendente", "confirmado", "enviado"].includes(pedido.status) && (
+        <div className="mt-4">
+          {pedido.status === "enviado" && (
+            <p className="mb-2 text-sm text-gray-600">
+              Como o pedido já foi enviado, cancelar aqui só marca que você quer devolvê-lo — o
+              status vai para <strong>aguardando_devolucao</strong> até o Admin confirmar o
+              recebimento do produto.
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={cancelando}
+            onClick={handleCancelar}
+            className="rounded border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            {cancelando ? "Cancelando..." : "Cancelar pedido"}
+          </button>
+        </div>
       )}
     </div>
   );

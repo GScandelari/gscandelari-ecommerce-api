@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { alterarStatusPedido, obterPedido } from "@/api/pedidos";
+import { alterarStatusPedido, obterPedido, reembolsarPedido } from "@/api/pedidos";
 import { ApiError } from "@/api/apiClient";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { TRANSICOES_VALIDAS, type Pedido, type PedidoStatus } from "@/types/pedido";
@@ -18,6 +18,7 @@ export function AdminOrderDetailPage() {
   const [novoStatus, setNovoStatus] = useState<PedidoStatus | "">("");
   const [error, setError] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const [reembolsando, setReembolsando] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -51,6 +52,22 @@ export function AdminOrderDetailPage() {
       setError(err instanceof ApiError ? err.message : "Erro inesperado ao alterar o status.");
     } finally {
       setSalvando(false);
+    }
+  }
+
+  // Task 21.3.2 (RN32): acao dedicada e independente da transicao de
+  // status - o pedido ja esta `cancelado`, so o paymentStatus muda aqui.
+  async function handleReembolsar(): Promise<void> {
+    if (!id) return;
+    setReembolsando(true);
+    setError(null);
+    try {
+      const atualizado = await reembolsarPedido(id);
+      setPedido(atualizado);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Erro inesperado ao solicitar o reembolso.");
+    } finally {
+      setReembolsando(false);
     }
   }
 
@@ -125,6 +142,17 @@ export function AdminOrderDetailPage() {
             {salvando ? "Salvando..." : "Alterar status"}
           </button>
         </div>
+      )}
+
+      {pedido.paymentStatus === "estorno_pendente" && (
+        <button
+          type="button"
+          disabled={reembolsando}
+          onClick={handleReembolsar}
+          className="mt-4 rounded border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          {reembolsando ? "Solicitando reembolso..." : "Solicitar reembolso"}
+        </button>
       )}
     </div>
   );

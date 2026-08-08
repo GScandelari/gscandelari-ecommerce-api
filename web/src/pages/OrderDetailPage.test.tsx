@@ -49,8 +49,38 @@ describe("OrderDetailPage", () => {
     expect(await screen.findByRole("button", { name: /cancelar pedido/i })).toBeInTheDocument();
   });
 
-  it("nao mostra o botao Cancelar fora de pendente", async () => {
+  it("nao mostra o botao Cancelar em status terminal (entregue)", async () => {
     mockRequest.mockResolvedValueOnce(pedido({ status: "entregue" }));
+
+    renderDetail();
+
+    await screen.findByText(/pedido #pedido-1/i);
+    expect(screen.queryByRole("button", { name: /cancelar pedido/i })).not.toBeInTheDocument();
+  });
+
+  // Fase 5 (RN28): botao passa a aparecer tambem em confirmado.
+  it("mostra o botao Cancelar quando o pedido esta confirmado", async () => {
+    mockRequest.mockResolvedValueOnce(pedido({ status: "confirmado", paymentStatus: "pago" }));
+
+    renderDetail();
+
+    expect(await screen.findByRole("button", { name: /cancelar pedido/i })).toBeInTheDocument();
+  });
+
+  // Fase 5 (RN29): botao aparece em enviado, com aviso distinto.
+  it("mostra o botao Cancelar com aviso de devolucao quando o pedido esta enviado", async () => {
+    mockRequest.mockResolvedValueOnce(pedido({ status: "enviado", paymentStatus: "pago" }));
+
+    renderDetail();
+
+    expect(await screen.findByRole("button", { name: /cancelar pedido/i })).toBeInTheDocument();
+    expect(screen.getByText(/aguardando_devolucao/i)).toBeInTheDocument();
+  });
+
+  it("nao mostra o botao Cancelar em aguardando_devolucao (so o Admin confirma a devolucao)", async () => {
+    mockRequest.mockResolvedValueOnce(
+      pedido({ status: "aguardando_devolucao", paymentStatus: "pago" }),
+    );
 
     renderDetail();
 

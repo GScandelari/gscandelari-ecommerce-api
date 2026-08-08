@@ -13,3 +13,7 @@ export const alterarStatusPedido = (id: string, data: AlterarStatusInput): Promi
 
 export const cancelarPedido = (id: string): Promise<Pedido> =>
   request<Pedido>(`/pedidos/${id}/cancelar`, { method: "PATCH" });
+
+/** RN32 (Fase 5): admin-only, disponível apenas com paymentStatus "estorno_pendente". */
+export const reembolsarPedido = (id: string): Promise<Pedido> =>
+  request<Pedido>(`/pedidos/${id}/reembolsar`, { method: "PATCH" });
