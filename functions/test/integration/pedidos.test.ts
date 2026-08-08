@@ -270,7 +270,21 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
       expect(await lerEstoqueDireto(produtoId)).toBe(6);
     });
 
-    it("RN07a: admin cancelando pedido enviado NAO restaura estoque", async () => {
+    // Fase 5 (Modulo 22 - Epico 22.2 - Task 22.2.2), cobre RN33.
+    //
+    // MUDANCA DE CONTRATO INTENCIONAL, NAO REGRESSAO: ate a Fase 1+2, admin
+    // cancelando um pedido `enviado` ia direto para `cancelado` (sem
+    // restaurar estoque, RN07a). A partir da Fase 5, `enviado -> cancelado`
+    // deixou de ser uma transicao estruturalmente valida (RN29/RN33): o
+    // admin so consegue cancelar um pedido `enviado` passando primeiro por
+    // `aguardando_devolucao` (RN29) e so entao confirmando o retorno fisico
+    // do produto via `aguardando_devolucao -> cancelado` (RN30, que
+    // restaura estoque - ver Epico 22.4 em
+    // pedidosCancelamentoExtendido.test.ts para a cobertura completa desse
+    // novo fluxo). Este teste, que antes validava "enviado->cancelado 200 +
+    // estoque nao restaurado", passa a validar que essa mesma tentativa
+    // agora e REJEITADA com 400.
+    it("RN29/RN33: admin tentando cancelar pedido enviado diretamente (enviado->cancelado) recebe 400 (transicao nao mais valida, ver aguardando_devolucao)", async () => {
       const produtoId = await criarProduto(adminUser, { estoque: 10 });
       const pedido = await request(app)
         .post("/pedidos")
@@ -291,7 +305,9 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
         .set("Authorization", `Bearer ${adminUser.idToken}`)
         .send({ status: "cancelado" });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
+      // Nenhum efeito colateral: nem status, nem estoque mudam numa
+      // transicao rejeitada.
       expect(await lerEstoqueDireto(produtoId)).toBe(6);
     });
   });
@@ -314,17 +330,31 @@ describe("Pedidos - RN02 a RN09, RN07a (Modulo 3 - Epico 3.3)", () => {
       expect(await lerEstoqueDireto(produtoId)).toBe(10);
     });
 
-    it("cliente tenta cancelar pedido fora de pendente -> 400", async () => {
+    // Fase 5 (Modulo 22 - Epico 22.2/22.3), cobre RN28.
+    //
+    // AJUSTE DE CONSISTENCIA (nao e o cenario de "enviado->cancelado" citado
+    // na Task 22.2.2, mas decorre da mesma emenda de RN05/RN06 - RN28): ate
+    // a Fase 1+2, "fora de pendente" era exemplificado com um pedido
+    // `confirmado`, que retornava 400. A partir da Fase 5, RN28 estende o
+    // cancelamento pelo cliente para tambem cobrir `confirmado` (200,
+    // cancelado imediato - ver Epico 22.3/Task 22.3.1 em
+    // pedidosCancelamentoExtendido.test.ts), entao `confirmado` deixou de
+    // ser um exemplo valido de "fora do que o cliente pode cancelar". O
+    // exemplo abaixo passa a usar `entregue`, que continua fora do alcance
+    // do cliente em qualquer fase (RN06/RN28 nunca mencionam `entregue`).
+    it("cliente tenta cancelar pedido fora do que lhe e permitido (entregue) -> 400", async () => {
       const produtoId = await criarProduto(adminUser, { estoque: 10 });
       const pedido = await request(app)
         .post("/pedidos")
         .set("Authorization", `Bearer ${clienteA.idToken}`)
         .send({ itens: [{ produtoId, quantidade: 1 }] });
 
-      await request(app)
-        .patch(`/pedidos/${pedido.body.id}/status`)
-        .set("Authorization", `Bearer ${adminUser.idToken}`)
-        .send({ status: "confirmado" });
+      for (const status of ["confirmado", "enviado", "entregue"]) {
+        await request(app)
+          .patch(`/pedidos/${pedido.body.id}/status`)
+          .set("Authorization", `Bearer ${adminUser.idToken}`)
+          .send({ status });
+      }
 
       const res = await request(app)
         .patch(`/pedidos/${pedido.body.id}/cancelar`)

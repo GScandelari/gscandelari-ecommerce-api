@@ -13,6 +13,11 @@
  * `src/services/stripeService.ts`, `src/routes/webhooks.routes.ts`, etc.
  * (Modulos 5/6, ainda nao implementados) - nao deste helper.
  *
+ * Fase 5 (Modulo 22 - Epico 22.1 - Task 22.1.1): estendido para simular
+ * tambem `stripe.refunds.create` (RN32, `reembolsarPedido` - Modulo 20,
+ * AINDA NAO IMPLEMENTADO), com sucesso/erro configuraveis por teste, no
+ * mesmo padrao ja usado para `paymentIntents.create`.
+ *
  * Uso: importar este modulo ANTES de importar `src/app` (ou qualquer modulo
  * que transitivamente importe `@/stripeClient`), para garantir que o mock
  * seja registrado antes do primeiro `require` real do cliente Stripe.
@@ -20,6 +25,7 @@
 
 export const mockPaymentIntentsCreate = jest.fn();
 export const mockWebhooksConstructEvent = jest.fn();
+export const mockRefundsCreate = jest.fn();
 
 jest.mock(
   "@/stripeClient",
@@ -30,6 +36,9 @@ jest.mock(
       },
       webhooks: {
         constructEvent: mockWebhooksConstructEvent,
+      },
+      refunds: {
+        create: mockRefundsCreate,
       },
     }),
   }),
@@ -44,4 +53,5 @@ jest.mock(
 export function resetStripeMocks(): void {
   mockPaymentIntentsCreate.mockReset();
   mockWebhooksConstructEvent.mockReset();
+  mockRefundsCreate.mockReset();
 }
