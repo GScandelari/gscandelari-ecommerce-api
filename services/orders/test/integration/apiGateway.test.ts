@@ -33,7 +33,7 @@ function functionIdOf(rewrite: HostingRewrite | undefined): string | undefined {
 }
 
 describe("API Gateway (Firebase Hosting rewrites) - RN20 (Modulo 11 / Task 12.4.1)", () => {
-  it("RN20: /produtos/** e /pedidos/** roteiam para a function orders-api", () => {
+  it("RN20: /produtos/** e /pedidos/** roteiam para a function ordersApi", () => {
     const config = loadFirebaseJson();
     const rewrites = config.hosting?.rewrites ?? [];
 
@@ -42,18 +42,18 @@ describe("API Gateway (Firebase Hosting rewrites) - RN20 (Modulo 11 / Task 12.4.
 
     expect(produtosRewrite).toBeDefined();
     expect(pedidosRewrite).toBeDefined();
-    expect(functionIdOf(produtosRewrite)).toBe("orders-api");
-    expect(functionIdOf(pedidosRewrite)).toBe("orders-api");
+    expect(functionIdOf(produtosRewrite)).toBe("ordersApi");
+    expect(functionIdOf(pedidosRewrite)).toBe("ordersApi");
   });
 
-  it("RN20: /webhooks/stripe roteia para a function payments-api", () => {
+  it("RN20: /webhooks/stripe roteia para a function paymentsApi", () => {
     const config = loadFirebaseJson();
     const rewrites = config.hosting?.rewrites ?? [];
 
     const webhookRewrite = rewrites.find((r) => r.source === "/webhooks/stripe");
 
     expect(webhookRewrite).toBeDefined();
-    expect(functionIdOf(webhookRewrite)).toBe("payments-api");
+    expect(functionIdOf(webhookRewrite)).toBe("paymentsApi");
   });
 
   it("RN20: Notifications nao e referenciada em nenhum rewrite do gateway (sem rota publica)", () => {

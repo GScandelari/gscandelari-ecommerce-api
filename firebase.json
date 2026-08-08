@@ -61,11 +61,11 @@
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
-      { "source": "/produtos/**", "function": "orders-api" },
-      { "source": "/pedidos/**", "function": "orders-api" },
-      { "source": "/health", "function": "orders-api" },
-      { "source": "/docs/**", "function": "orders-api" },
-      { "source": "/webhooks/stripe", "function": "payments-api" }
+      { "source": "/produtos/**", "function": "ordersApi" },
+      { "source": "/pedidos/**", "function": "ordersApi" },
+      { "source": "/health", "function": "ordersApi" },
+      { "source": "/docs/**", "function": "ordersApi" },
+      { "source": "/webhooks/stripe", "function": "paymentsApi" }
     ]
   },
   "emulators": {

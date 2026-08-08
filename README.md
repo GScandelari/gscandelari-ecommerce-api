@@ -438,7 +438,7 @@ Hoje em produção (Fase 2, RN10-RN15):
    npx firebase-tools emulators:start
    ```
    Isso sobe Auth + Firestore + Functions (4 codebases) + Hosting (gateway, Módulo 11) no mesmo Emulator UI (`localhost:4000`), sempre contra o projeto demo `demo-gscandelari-ecommerce-api` — nunca um projeto real, mesma garantia já documentada para a Fase 1+2.
-3. Convenção de nomes de export por codebase (Firebase prefixa automaticamente pelo nome do codebase — Task 8.5.2): `orders-api`, `payments-api`, `notifications-onPedidoStatusChange`, sem colisão com a function `api` do codebase `default`.
+3. Convenção de nomes de export por codebase (Task 8.5.2 — **correção pós-Épico 8.6**: codebases diferentes NÃO namespaceiam/prefixam o ID da function automaticamente; o ID final é literalmente o nome do identificador exportado em `index.ts`, e precisa ser único entre *todos* os codebases do projeto, não só dentro do próprio. Um primeiro deploy real com `export const api` em `orders` e `payments` falhou com `More than one codebase claims functions/api`, algo que o Emulator Suite nunca detecta): `ordersApi`, `paymentsApi`, `onPedidoStatusChange` (Notifications), sem colisão com a function `api` do codebase `default`.
 4. Cada serviço tem sua própria suíte de testes, lint e build, todos verdes (mesmo padrão do `ci-services.yml`):
    ```bash
    cd services/orders && npm run lint && npm run build && npm run test:coverage:emulator
