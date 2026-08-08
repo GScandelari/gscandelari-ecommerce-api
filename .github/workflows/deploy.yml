@@ -84,8 +84,15 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
 
-      - name: Deploy para Firebase Functions
-        run: npx firebase-tools deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
+      - name: Deploy para Firebase Functions (codebase default apenas)
+        # IMPORTANTE (Fase 3): firebase.json passou a declarar 4 codebases
+        # (default/orders/payments/notifications). Um "--only functions" sem
+        # escopo deployaria TODOS eles - incluindo os 3 novos serviços da
+        # Fase 3, cujo corte de producao (Epico 8.6) e deliberadamente
+        # separado e ainda nao autorizado. `--only functions:default` limita
+        # o deploy exclusivamente ao monolito Fase 1+2 (function `api`), o
+        # unico escopo que este workflow sempre teve.
+        run: npx firebase-tools deploy --only functions:default --project "$FIREBASE_PROJECT_ID" --non-interactive
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
           FIREBASE_PROJECT_ID: gscandelari-ecommerce-api
