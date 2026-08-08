@@ -1,10 +1,10 @@
 # gscandelari-ecommerce-api
 
-API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, **Fases 1-4 concluídas, Fase 5 em andamento**.
+API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, **Fases 1-5 concluídas**.
 
 Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
-> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **implementada e mesclada em `main`** (código + testes verdes), mas **ainda não deployada em produção real** — decisão deliberada do usuário. Fase 4 (front-end de testes, `web/`) está implementada. Fase 5 (cancelamento pós-pagamento e reembolso) tem spec/backlog aprovados, implementação em andamento. A **produção real não foi alterada** desde a Fase 2: o monólito `functions/` (codebase `default`) continua deployado e servindo 100% do tráfego real (inclusive o webhook do Stripe) sem interrupção, até o corte de produção da Fase 3 ser deliberadamente executado. Ver [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços) abaixo.
+> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **implementada e mesclada em `main`** (código + testes verdes), mas **ainda não deployada em produção real** — decisão deliberada do usuário. Fase 4 (front-end de testes, `web/`) está implementada. Fase 5 (cancelamento pós-pagamento e reembolso) está implementada e mesclada em `main`. A **produção real não foi alterada** desde a Fase 2 (a correção de bug e as novas regras da Fase 5 em `functions/` ainda não foram deployadas — decisão pendente do usuário): o monólito `functions/` (codebase `default`) continua deployado e servindo 100% do tráfego real (inclusive o webhook do Stripe) sem interrupção, até o corte de produção da Fase 3 ser deliberadamente executado. Ver [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços) abaixo.
 
 ## Estado atual do projeto
 
@@ -19,7 +19,7 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 
 **Fase 3 (microsserviços): implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); todos sobem juntos no Emulator Suite e passam no CI (`ci-services.yml`). A produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual (`default`) — o corte de produção (Épico 8.6 do `BACKLOG.md`) fica pendente até o usuário decidir promover o projeto. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços).
 
-**Fase 5 (cancelamento pós-pagamento e reembolso): spec e backlog aprovados (`SPEC.md`/`BACKLOG.md`), implementação pendente.** Emenda RN05/RN06/RN07 (Fase 1) e o modelo de pagamento (Fase 2) para permitir que o Cliente cancele também um pedido `confirmado`, introduz o status intermediário `aguardando_devolucao` para cancelamento a partir de `enviado`, e adiciona uma ação dedicada de reembolso via Stripe para o Admin (RN28-RN33) — sempre manual e deliberada, nunca automática. Nenhum código de produção desta fase foi escrito ainda; a documentação da máquina de estados estendida (comportamento alvo, não o estado atual do código) está na seção [Máquina de estados do Pedido — status e pagamento](#máquina-de-estados-do-pedido--status-e-pagamento) abaixo.
+**Fase 5 (cancelamento pós-pagamento e reembolso): implementada e mesclada em `main`; ainda não deployada em produção real, por decisão pendente do usuário.** Emenda RN05/RN06/RN07 (Fase 1) e o modelo de pagamento (Fase 2) para permitir que o Cliente cancele também um pedido `confirmado`, introduz o status intermediário `aguardando_devolucao` para cancelamento a partir de `enviado`, e adiciona uma ação dedicada de reembolso via Stripe para o Admin (RN28-RN33) — sempre manual e deliberada, nunca automática. Também corrige um bug real encontrado testando a Fase 4 de ponta a ponta: o webhook do Stripe (`POST /webhooks/stripe`) nunca validava a assinatura corretamente através do Functions Framework (`req.body` já vinha parseado, não cru) — corrigido usando `req.rawBody`. `functions/` (92 testes), `services/orders`+`services/payments` (93+33 testes, réplica sem deploy) e `web/` (37 testes) todos verdes. Documentação da máquina de estados estendida está na seção [Máquina de estados do Pedido — status e pagamento](#máquina-de-estados-do-pedido--status-e-pagamento) abaixo.
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -315,7 +315,7 @@ Passo **manual**, feito uma vez por ambiente (dev local com túnel/Stripe CLI, e
 
 ## Máquina de estados do Pedido — status e pagamento
 
-`status` (`PedidoStatus`) e `paymentStatus` (`PaymentStatus`) são dois campos independentes do mesmo documento `Pedido`. RN05/RN06/RN07/RN07a (Fase 1, em produção) definem a máquina de `status`; RN10-RN15 (Fase 2, em produção) definem `paymentStatus`. **RN28-RN33 (Fase 5) estendem as duas** — spec e backlog já aprovados em `SPEC.md`/`BACKLOG.md`, **mas ainda não implementados**: os trechos marcados abaixo como "Fase 5" descrevem o comportamento alvo aprovado, não o estado atual do código em `functions/`.
+`status` (`PedidoStatus`) e `paymentStatus` (`PaymentStatus`) são dois campos independentes do mesmo documento `Pedido`. RN05/RN06/RN07/RN07a (Fase 1, em produção) definem a máquina de `status`; RN10-RN15 (Fase 2, em produção) definem `paymentStatus`. **RN28-RN33 (Fase 5) estendem as duas** — implementadas e mescladas em `main`, mas **ainda não deployadas em produção real** (decisão pendente do usuário, ver "Estado atual do projeto" acima): os trechos marcados abaixo como "Fase 5" já existem no código de `functions/` mas ainda não estão servindo tráfego real.
 
 ### `status` do Pedido (`PedidoStatus`)
 
@@ -330,13 +330,13 @@ Cancelamento, hoje em produção (Fase 1, RN05/RN06/RN07/RN07a):
 - `confirmado → cancelado` — somente Admin; estoque **não** é restaurado automaticamente (RN07a).
 - `enviado → cancelado` — somente Admin; estoque **não** é restaurado automaticamente (RN07a).
 
-**Fase 5 (spec aprovada, implementação pendente)** — RN28/RN29/RN30/RN33 alteram esse quadro:
+**Fase 5 (implementada, ainda não deployada em produção real)** — RN28/RN29/RN30/RN33 alteram esse quadro:
 - `confirmado → cancelado` passa a também poder ser disparada pelo **Cliente** dono do pedido (RN28; hoje só o Admin pode). Quando é o Cliente quem cancela um `confirmado`, o estoque **é** restaurado (RN28); quando é o **Admin** quem cancela um `confirmado`, o estoque continua **não** sendo restaurado (RN07a inalterado para o Admin — assimetria Cliente/Admin deliberada, ver Decisão técnica 3 do `BACKLOG.md`/Fase 5).
 - `enviado → cancelado` deixa de existir como transição direta (tanto para o Cliente quanto para o Admin). Em seu lugar entra o novo status intermediário `aguardando_devolucao`, sinalizando que o produto ainda está fisicamente com o cliente:
   - `enviado → aguardando_devolucao` — Cliente dono ou Admin (RN29); nenhuma restauração de estoque nem mudança de `paymentStatus` nesta transição (o pedido ainda não está `cancelado`).
   - `aguardando_devolucao → cancelado` — **somente Admin**, confirmando que o produto retornou fisicamente (RN30); estoque restaurado (mesma lógica de RN07a).
 
-Diagrama textual, já incluindo a extensão da Fase 5 (itens marcados `[Fase 5]` ainda não implementados):
+Diagrama textual, já incluindo a extensão da Fase 5 (itens marcados `[Fase 5]` já implementados no código, ainda não em produção real):
 
 ```
 pendente
@@ -356,7 +356,7 @@ Hoje em produção (Fase 2, RN10-RN15):
 - `pago` — setado quando o webhook `payment_intent.succeeded` confirma o pagamento (RN12).
 - `falhou` — setado quando o webhook `payment_intent.payment_failed` (ou equivalente) é recebido (RN13); o pedido também é cancelado e o estoque restaurado nesse mesmo evento.
 
-**Fase 5 (spec aprovada, implementação pendente)** — RN31/RN32/RN33 adicionam dois novos valores:
+**Fase 5 (implementada, ainda não deployada em produção real)** — RN31/RN32/RN33 adicionam dois novos valores:
 - `estorno_pendente` — quando um pedido com `paymentStatus: "pago"` é cancelado por qualquer uma das transições acima que levam a `cancelado` (`confirmado → cancelado` pelo Cliente ou pelo Admin, ou `aguardando_devolucao → cancelado` pelo Admin), `paymentStatus` muda **automaticamente** para `estorno_pendente` (RN31). Essa mudança de `paymentStatus` é o único efeito automático do cancelamento sobre o pagamento — **nenhuma chamada ao Stripe é feita nesse momento**. Um pedido cancelado a partir de `pendente` nunca chega a `estorno_pendente` (ainda não havia cobrança confirmada nesse caso).
 - `reembolsado` — só é alcançado através de uma ação **dedicada, manual e exclusiva do Admin**: `PATCH /pedidos/:id/reembolsar` (admin-only, RN32), disponível apenas quando `paymentStatus === "estorno_pendente"`, chama `stripe.refunds.create` pelo valor total do pedido (`pedido.total`, sem reembolso parcial nesta fase). Sucesso → `paymentStatus: "reembolsado"` (o `status` do pedido, já `cancelado`, não muda). Falha na chamada ao Stripe → `paymentStatus` permanece `estorno_pendente` (permite nova tentativa), resposta HTTP 502 (`PaymentGatewayError`, mesmo padrão de RN10).
 
