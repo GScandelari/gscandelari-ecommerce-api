@@ -29,6 +29,18 @@ router.post(
       throw new ValidationError("Assinatura do webhook (stripe-signature) ausente.");
     }
 
+    // O Firebase Functions Framework (onRequest, 2a geracao) sempre faz seu
+    // proprio parse do corpo da requisicao ANTES de repassar para o app
+    // Express - por isso `req.body` chega como objeto ja parseado mesmo com
+    // express.raw() montado nesta rota (o middleware nunca ve o stream cru
+    // nesse contexto). O corpo cru fica em `req.rawBody` (Buffer), populado
+    // automaticamente pelo proprio framework. Em testes (Supertest direto
+    // contra o app Express, sem o wrapper do Functions Framework),
+    // `req.rawBody` nao existe e `req.body` continua sendo o Buffer setado
+    // por express.raw() - por isso o fallback abaixo funciona nos dois
+    // ambientes sem exigir mudanca nos testes existentes.
+    const payload = (req as express.Request & { rawBody?: Buffer }).rawBody ?? req.body;
+
     // Nao valida STRIPE_WEBHOOK_SECRET aqui: o proprio constructEvent (real
     // ou mockado nos testes) e a fonte de verdade - se o secret estiver
     // ausente/errado, o SDK real ja rejeita a assinatura, caindo no catch
@@ -36,7 +48,7 @@ router.post(
     let event;
     try {
       event = getStripeClient().webhooks.constructEvent(
-        req.body,
+        payload,
         signature,
         process.env.STRIPE_WEBHOOK_SECRET ?? "",
       );

@@ -28,10 +28,24 @@ router.post(
       throw new ValidationError("Assinatura do webhook (stripe-signature) ausente.");
     }
 
+    // O Firebase Functions Framework (onRequest, 2a geracao) sempre faz seu
+    // proprio parse do corpo da requisicao ANTES de repassar para o app
+    // Express - por isso `req.body` chega como objeto ja parseado mesmo com
+    // express.raw() montado nesta rota. O corpo cru fica em `req.rawBody`
+    // (Buffer), populado automaticamente pelo framework. Em testes
+    // (Supertest direto contra o app Express) `req.rawBody` nao existe e
+    // `req.body` continua sendo o Buffer setado por express.raw() - por
+    // isso o fallback abaixo funciona nos dois ambientes. Bug real
+    // encontrado na Fase 4 testando o front-end contra o Emulator Suite de
+    // ponta a ponta com o Stripe CLI (nunca pego pelos testes, que exercitam
+    // o app Express puro, sem o wrapper do Functions Framework) - mesma
+    // correcao aplicada em functions/src/routes/webhooks.routes.ts (Fase 2).
+    const payload = (req as express.Request & { rawBody?: Buffer }).rawBody ?? req.body;
+
     let event;
     try {
       event = getStripeClient().webhooks.constructEvent(
-        req.body,
+        payload,
         signature,
         process.env.STRIPE_WEBHOOK_SECRET ?? "",
       );
