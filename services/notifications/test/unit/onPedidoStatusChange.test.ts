@@ -147,6 +147,30 @@ describe("Trigger onPedidoStatusChange - RN19 (Modulo 10 - Epico 10.2 / Task 12.
     expect(mockEmailsSend).toHaveBeenCalledTimes(1);
   });
 
+  // Bug real encontrado no corte de producao (Epico 8.6): o SDK do Resend
+  // NAO lanca excecao em erros de nivel de API - devolve `{ data: null,
+  // error }`. Sem checar esse campo explicitamente, uma rejeicao da API
+  // (ex.: sandbox recusando o destinatario) passava batido, sem nenhum log
+  // - so descoberto inspecionando o comportamento real em producao.
+  it("RN19 (clausula best-effort): erro de nivel de API do Resend ({ data: null, error }) e logado, sem lancar excecao", async () => {
+    const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    mockEmailsSend.mockResolvedValue({
+      data: null,
+      error: { name: "validation_error", message: "recipient not allowed in sandbox mode" },
+    });
+    const before: PedidoDocFake = { clienteId: cliente.uid, status: "pendente", total: 60 };
+    const after: PedidoDocFake = { clienteId: cliente.uid, status: "confirmado", total: 60 };
+
+    await onPedidoStatusChange.run(makeEvent(before, after));
+
+    expect(mockEmailsSend).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Falha ao enviar notificacao"),
+      expect.objectContaining({ message: "recipient not allowed in sandbox mode" }),
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
   it("RN19 (clausula best-effort): clienteId sem usuario correspondente no Auth Emulator -> best-effort, sem excecao nao tratada", async () => {
     const before: PedidoDocFake = {
       clienteId: "uid-inexistente-no-auth-emulator",

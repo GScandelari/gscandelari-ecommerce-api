@@ -38,12 +38,22 @@ export const onPedidoStatusChange = onDocumentUpdated(
       const assunto =
         after.status === "confirmado" ? "Seu pedido foi confirmado!" : "Seu pedido foi cancelado";
 
-      await getResendClient().emails.send({
+      const { error } = await getResendClient().emails.send({
         from: EMAIL_FROM,
         to: user.email,
         subject: assunto,
         text: `Ola! Seu pedido no valor de R$ ${after.total.toFixed(2)} agora esta "${after.status}".`,
       });
+      // BUG REAL encontrado no corte de producao (Epico 8.6): o SDK do
+      // Resend NAO lanca excecao em erros de nivel de API (ex.: sandbox
+      // rejeitando o destinatario, remetente invalido) - ele devolve
+      // `{ data: null, error }`, nunca populando o `catch` abaixo. Sem
+      // essa checagem explicita, uma falha da API do Resend passava
+      // batido, sem nenhum log - invisivel tanto pro emulador (SDK
+      // mockado nos testes) quanto pra qualquer teste automatizado.
+      if (error) {
+        console.error("Falha ao enviar notificacao de pedido (best-effort, nao bloqueia nada):", error);
+      }
     } catch (err) {
       console.error("Falha ao enviar notificacao de pedido (best-effort, nao bloqueia nada):", err);
     }
