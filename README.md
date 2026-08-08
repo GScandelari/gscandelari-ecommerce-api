@@ -1,10 +1,10 @@
 # gscandelari-ecommerce-api
 
-API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, **Fase 1 (Core API)**.
+API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, **Fases 1-4 concluídas, Fase 5 em andamento**.
 
 Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
-> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **em desenvolvimento na branch `feat/fase-3-microservicos`** — scaffold e suíte de testes TDD dos 3 novos serviços já commitados, implementação em andamento. A **produção real não foi alterada**: o monólito desta Fase 1+2 (`functions/`, codebase `default`) continua deployado e servindo 100% do tráfego real (inclusive o webhook do Stripe) sem interrupção, até o corte de produção ser deliberadamente executado como última etapa da Fase 3. Ver [Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento) abaixo.
+> Fase 2 (integração de pagamento real via Stripe, sempre em modo sandbox) já está implementada, testada e **deployada em produção**. Fase 3 (quebra em microsserviços) está **implementada e mesclada em `main`** (código + testes verdes), mas **ainda não deployada em produção real** — decisão deliberada do usuário. Fase 4 (front-end de testes, `web/`) está implementada. Fase 5 (cancelamento pós-pagamento e reembolso) tem spec/backlog aprovados, implementação em andamento. A **produção real não foi alterada** desde a Fase 2: o monólito `functions/` (codebase `default`) continua deployado e servindo 100% do tráfego real (inclusive o webhook do Stripe) sem interrupção, até o corte de produção da Fase 3 ser deliberadamente executado. Ver [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços) abaixo.
 
 ## Estado atual do projeto
 
@@ -17,7 +17,9 @@ Construída com **Firebase Cloud Functions (2ª geração) + Express + TypeScrip
 
 **Fase 4 (front-end de testes, `web/`): implementada e mesclada em `main`.** SPA React + Vite + TypeScript, em `web/` na raiz do monorepo, para exercitar visualmente a API do monólito da Fase 1+2 (`functions/`) rodando **exclusivamente contra o Firebase Emulator Suite local** — nunca um projeto Firebase real (RN27). Não é o produto final do portfólio (esse é a API): é uma ferramenta de teste/demonstração com dois perfis, Cliente e Administrador. Lint, build e testes (Vitest + React Testing Library) verdes localmente e no `ci-web.yml`. Documentação de como rodar `web/` junto com o emulador está na seção [Front-end de testes (Fase 4) — `web/`](#front-end-de-testes-fase-4--web) abaixo.
 
-**Fase 3 (microsserviços): implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); todos sobem juntos no Emulator Suite e passam no CI (`ci-services.yml`). A produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual (`default`) — o corte de produção (Épico 8.6 do `BACKLOG.md`) fica pendente até o usuário decidir promover o projeto. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento).
+**Fase 3 (microsserviços): implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Reestrutura o monólito em 3 codebases independentes (`services/orders/`, `services/payments/`, `services/notifications/`) atrás de um API Gateway (Firebase Hosting). `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); todos sobem juntos no Emulator Suite e passam no CI (`ci-services.yml`). A produção real **não foi alterada** e continua servindo 100% do tráfego pelo monólito atual (`default`) — o corte de produção (Épico 8.6 do `BACKLOG.md`) fica pendente até o usuário decidir promover o projeto. Detalhes completos em [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços).
+
+**Fase 5 (cancelamento pós-pagamento e reembolso): spec e backlog aprovados (`SPEC.md`/`BACKLOG.md`), implementação pendente.** Emenda RN05/RN06/RN07 (Fase 1) e o modelo de pagamento (Fase 2) para permitir que o Cliente cancele também um pedido `confirmado`, introduz o status intermediário `aguardando_devolucao` para cancelamento a partir de `enviado`, e adiciona uma ação dedicada de reembolso via Stripe para o Admin (RN28-RN33) — sempre manual e deliberada, nunca automática. Nenhum código de produção desta fase foi escrito ainda; a documentação da máquina de estados estendida (comportamento alvo, não o estado atual do código) está na seção [Máquina de estados do Pedido — status e pagamento](#máquina-de-estados-do-pedido--status-e-pagamento) abaixo.
 
 Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de cada item.
 
@@ -32,7 +34,8 @@ Consulte `BACKLOG.md` para o detalhamento task a task e o critério de aceite de
 - [CI/CD](#cicd)
 - [Deploy](#deploy)
 - [Integração de pagamento (Stripe) — Fase 2](#integração-de-pagamento-stripe--fase-2)
-- [Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento)
+- [Máquina de estados do Pedido — status e pagamento](#máquina-de-estados-do-pedido--status-e-pagamento)
+- [Arquitetura da Fase 3 (Microsserviços)](#arquitetura-da-fase-3-microsserviços)
 - [Front-end de testes (Fase 4) — `web/`](#front-end-de-testes-fase-4--web)
 - [Contribuindo](#contribuindo)
 
@@ -194,14 +197,17 @@ npm run format:check   # Prettier (use `npm run format` para corrigir)
     ├── tsconfig.json / tsconfig.build.json
     └── jest.config.js            # coverage threshold 70%
 
-└── services/                  # Fase 3 (microsserviços) — EM DESENVOLVIMENTO,
-                                # branch feat/fase-3-microservicos, não deployado.
-                                # Ver "Arquitetura da Fase 3" para detalhes.
+├── web/                        # Fase 4: front-end de testes (React + Vite + TS),
+│                                 # só contra o Emulator Suite local (RN27). Ver
+│                                 # "Front-end de testes (Fase 4)" para detalhes.
+└── services/                  # Fase 3 (microsserviços) — implementada, mesclada
+                                # em main (PR #1), ainda não deployada em produção
+                                # real. Ver "Arquitetura da Fase 3" para detalhes.
     ├── orders/                 # produtos + pedidos (RN01-RN09, RN16-RN18)
     ├── payments/                # Stripe + webhook (RN10-RN15, RN16-RN18)
     └── notifications/            # e-mail via Resend, sem rota HTTP (RN19-RN20)
         # cada um com seu próprio package.json/tsconfig/jest.config.js,
-        # src/ (ainda vazio) e test/ (suíte TDD já commitada, "vermelha")
+        # src/ e test/ implementados, lint/build/test verdes
 ```
 
 ## CI/CD
@@ -210,7 +216,7 @@ Workflows em `.github/workflows/`:
 
 - **`ci.yml`** — roda em todo Pull Request para `main` e em todo push em `main`. Etapas: `npm ci` (instala dependências), `npm run lint`, `npm run build`, `npm run test:coverage:emulator` (Jest + Supertest contra o Firebase Emulator Suite, com o mesmo `firebase-tools` travado no `package-lock.json`). Nenhuma etapa de CI toca um projeto Firebase real. Este workflow é o check obrigatório configurado na proteção da branch `main` (ver `CONTRIBUTING.md`). **Cuida exclusivamente de `functions/` (Fase 1+2, em produção) e não foi alterado pela Fase 3.**
 - **`deploy.yml`** — deploy para Firebase Functions (`functions/`, codebase `default`, Fase 1+2). Ver decisão detalhada abaixo. **Não foi alterado pela Fase 3** — continua deployando somente o monólito atual.
-- **`ci-services.yml`** (novo, Fase 3) — roda lint/build/test **de forma independente** para cada um dos 3 novos serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, disparado em push/PR que tocam `services/**` na branch `feat/fase-3-microservicos` (e em PRs futuros para `main`). Não interfere em `ci.yml`/`deploy.yml` nem nos checks obrigatórios de `main` hoje. **Estado esperado atualmente: vermelho** (lint falha por não haver `eslint.config` por serviço ainda — Task 8.1.2; testes falham por não haver `src/` implementado ainda — Módulos 8-10), refletindo o TDD "vermelho" intencional descrito em [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços--em-desenvolvimento). **Não existe workflow de deploy para os novos serviços nesta rodada** — deploy real é a última etapa da Fase 3 (Épico 8.6), disparada manualmente e só com aprovação explícita do usuário.
+- **`ci-services.yml`** (Fase 3) — roda lint/build/test **de forma independente** para cada um dos 3 serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, disparado em push/PR para `main` que tocam `services/**`. Não interfere em `ci.yml`/`deploy.yml` nem nos checks obrigatórios de `main`. Verde hoje (código implementado, ver [Arquitetura da Fase 3](#arquitetura-da-fase-3-microsserviços)). **Não existe workflow de deploy para os novos serviços** — deploy real é a última etapa da Fase 3 (Épico 8.6), disparada manualmente e só com aprovação explícita do usuário.
 - **`ci-web.yml`** (novo, Fase 4) — mesmo padrão de `ci-services.yml`, aplicado a `web/`: `npm ci`, lint, `format:check` (Prettier), build (TypeScript + Vite) e testes (Vitest + React Testing Library, com `fetch`/Firebase Auth mockados — nunca depende do Emulator Suite rodando em CI). Disparado em push/PR para `main` que tocam `web/**`. **Sem step de deploy** — a aplicação `web/` não é publicada nesta fase (uso local/experimentação contra o Emulator Suite, decisão explícita do usuário, ver [Front-end de testes (Fase 4)](#front-end-de-testes-fase-4--web) abaixo). Não é (ainda) um check obrigatório de nenhuma branch protection, mesmo padrão de `ci-services.yml`.
 
 ## Deploy
@@ -307,9 +313,58 @@ Passo **manual**, feito uma vez por ambiente (dev local com túnel/Stripe CLI, e
 5. Copie esse valor e configure-o em produção com `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET` (comando acima). Se o endpoint for recriado ou o secret for "rolado" (rotate) no Dashboard, repita este passo com o novo valor.
 6. Para testar localmente sem expor o emulador publicamente, use o [Stripe CLI](https://docs.stripe.com/stripe-cli) (`stripe listen --forward-to localhost:5001/demo-gscandelari-ecommerce-api/us-central1/api/webhooks/stripe`), que gera seu próprio signing secret de teste temporário para colocar no `.env` local.
 
-## Arquitetura da Fase 3 (Microsserviços) — em desenvolvimento
+## Máquina de estados do Pedido — status e pagamento
 
-> **Status: em desenvolvimento na branch `feat/fase-3-microservicos`, ainda não mesclada em `main`.** Esta seção documenta o alvo da Fase 3 (`SPEC.md` seção "Fase 3", `BACKLOG.md` Módulos 8-12) e o que já existe hoje nesta branch: estrutura de pastas + `package.json`/`tsconfig`/`jest.config` de cada novo serviço, e a suíte de testes TDD dos Módulos 9-12 (propositalmente "vermelha" — `src/` de cada serviço ainda está vazio, aguardando a implementação). **Nada disto está deployado.** A produção real do projeto (`gscandelari-ecommerce-api`) continua rodando exclusivamente o monólito da Fase 1+2 (`functions/`, codebase `default`, function `api`), servindo 100% do tráfego real sem qualquer interrupção — inclusive o webhook do Stripe, cadastrado no Dashboard real (modo teste) apontando para a URL do monólito. `firebase.json` hoje ainda declara só o codebase `default`; estendê-lo para os 4 codebases é a Task 8.1.3 (Módulo 8), ainda não executada.
+`status` (`PedidoStatus`) e `paymentStatus` (`PaymentStatus`) são dois campos independentes do mesmo documento `Pedido`. RN05/RN06/RN07/RN07a (Fase 1, em produção) definem a máquina de `status`; RN10-RN15 (Fase 2, em produção) definem `paymentStatus`. **RN28-RN33 (Fase 5) estendem as duas** — spec e backlog já aprovados em `SPEC.md`/`BACKLOG.md`, **mas ainda não implementados**: os trechos marcados abaixo como "Fase 5" descrevem o comportamento alvo aprovado, não o estado atual do código em `functions/`.
+
+### `status` do Pedido (`PedidoStatus`)
+
+Fluxo principal, sempre nesta ordem (RN05):
+
+```
+pendente → confirmado → enviado → entregue
+```
+
+Cancelamento, hoje em produção (Fase 1, RN05/RN06/RN07/RN07a):
+- `pendente → cancelado` — Cliente dono do pedido ou Admin; estoque restaurado (RN06/RN07a).
+- `confirmado → cancelado` — somente Admin; estoque **não** é restaurado automaticamente (RN07a).
+- `enviado → cancelado` — somente Admin; estoque **não** é restaurado automaticamente (RN07a).
+
+**Fase 5 (spec aprovada, implementação pendente)** — RN28/RN29/RN30/RN33 alteram esse quadro:
+- `confirmado → cancelado` passa a também poder ser disparada pelo **Cliente** dono do pedido (RN28; hoje só o Admin pode). Quando é o Cliente quem cancela um `confirmado`, o estoque **é** restaurado (RN28); quando é o **Admin** quem cancela um `confirmado`, o estoque continua **não** sendo restaurado (RN07a inalterado para o Admin — assimetria Cliente/Admin deliberada, ver Decisão técnica 3 do `BACKLOG.md`/Fase 5).
+- `enviado → cancelado` deixa de existir como transição direta (tanto para o Cliente quanto para o Admin). Em seu lugar entra o novo status intermediário `aguardando_devolucao`, sinalizando que o produto ainda está fisicamente com o cliente:
+  - `enviado → aguardando_devolucao` — Cliente dono ou Admin (RN29); nenhuma restauração de estoque nem mudança de `paymentStatus` nesta transição (o pedido ainda não está `cancelado`).
+  - `aguardando_devolucao → cancelado` — **somente Admin**, confirmando que o produto retornou fisicamente (RN30); estoque restaurado (mesma lógica de RN07a).
+
+Diagrama textual, já incluindo a extensão da Fase 5 (itens marcados `[Fase 5]` ainda não implementados):
+
+```
+pendente
+  ├─► confirmado
+  │      ├─► enviado
+  │      │      ├─► entregue
+  │      │      └─► aguardando_devolucao [Fase 5, RN29] (Cliente ou Admin)
+  │      │             └─► cancelado [Fase 5, RN30] (somente Admin; restaura estoque)
+  │      └─► cancelado (Admin sempre; Cliente também a partir da Fase 5, RN28)
+  └─► cancelado (Cliente dono ou Admin; restaura estoque)
+```
+
+### `paymentStatus` do Pedido (`PaymentStatus`)
+
+Hoje em produção (Fase 2, RN10-RN15):
+- `aguardando_pagamento` — valor inicial, atribuído na criação do pedido junto com a PaymentIntent (RN10).
+- `pago` — setado quando o webhook `payment_intent.succeeded` confirma o pagamento (RN12).
+- `falhou` — setado quando o webhook `payment_intent.payment_failed` (ou equivalente) é recebido (RN13); o pedido também é cancelado e o estoque restaurado nesse mesmo evento.
+
+**Fase 5 (spec aprovada, implementação pendente)** — RN31/RN32/RN33 adicionam dois novos valores:
+- `estorno_pendente` — quando um pedido com `paymentStatus: "pago"` é cancelado por qualquer uma das transições acima que levam a `cancelado` (`confirmado → cancelado` pelo Cliente ou pelo Admin, ou `aguardando_devolucao → cancelado` pelo Admin), `paymentStatus` muda **automaticamente** para `estorno_pendente` (RN31). Essa mudança de `paymentStatus` é o único efeito automático do cancelamento sobre o pagamento — **nenhuma chamada ao Stripe é feita nesse momento**. Um pedido cancelado a partir de `pendente` nunca chega a `estorno_pendente` (ainda não havia cobrança confirmada nesse caso).
+- `reembolsado` — só é alcançado através de uma ação **dedicada, manual e exclusiva do Admin**: `PATCH /pedidos/:id/reembolsar` (admin-only, RN32), disponível apenas quando `paymentStatus === "estorno_pendente"`, chama `stripe.refunds.create` pelo valor total do pedido (`pedido.total`, sem reembolso parcial nesta fase). Sucesso → `paymentStatus: "reembolsado"` (o `status` do pedido, já `cancelado`, não muda). Falha na chamada ao Stripe → `paymentStatus` permanece `estorno_pendente` (permite nova tentativa), resposta HTTP 502 (`PaymentGatewayError`, mesmo padrão de RN10).
+
+> **Reembolso nunca é automático.** Nenhuma transição de `status` — nem RN28, nem RN29+RN30, nem o cancelamento já existente do Admin a partir de `pendente` — dispara por si só uma chamada ao Stripe. O cancelamento apenas sinaliza que um reembolso é devido (`paymentStatus: "estorno_pendente"`); efetivá-lo é sempre uma decisão humana explícita e posterior do Admin, através do endpoint `PATCH /pedidos/:id/reembolsar` dedicado a essa ação.
+
+## Arquitetura da Fase 3 (Microsserviços)
+
+> **Status: implementada e mesclada em `main` (PR #1); ainda não promovida a produção real, por decisão deliberada do usuário.** Esta seção documenta a arquitetura da Fase 3 (`SPEC.md` seção "Fase 3", `BACKLOG.md` Módulos 8-12), hoje totalmente implementada em `main`: os 3 novos serviços (código + testes + lint) e o `firebase.json` com os 4 codebases. **Nada disto está deployado ainda.** A produção real do projeto (`gscandelari-ecommerce-api`) continua rodando exclusivamente o monólito da Fase 1+2 (`functions/`, codebase `default`, function `api`), servindo 100% do tráfego real sem qualquer interrupção — inclusive o webhook do Stripe, cadastrado no Dashboard real (modo teste) apontando para a URL do monólito. `firebase.json` já declara os 4 codebases (`default` + `orders`/`payments`/`notifications`); o corte de produção real (Épico 8.6 do `BACKLOG.md`) é a única etapa ainda pendente, aguardando decisão explícita do usuário.
 
 ### Diagrama (arquitetura alvo)
 
@@ -366,20 +421,19 @@ Passo **manual**, feito uma vez por ambiente (dev local com túnel/Stripe CLI, e
    cd services/payments && npm install && cd ../..
    cd services/notifications && npm install && cd ../..
    ```
-2. A partir da Task 8.1.3 do `BACKLOG.md` (Módulo 8, ainda não executada nesta branch), `firebase.json` passa a declarar um array `codebases` com `default` (`functions/`, Fase 1+2), `orders` (`services/orders`), `payments` (`services/payments`) e `notifications` (`services/notifications`). A partir daí, o mesmo comando já usado hoje sobe os 4 codebases simultaneamente a partir da raiz do repositório:
+2. `firebase.json` já declara um array `codebases` com `default` (`functions/`, Fase 1+2), `orders` (`services/orders`), `payments` (`services/payments`) e `notifications` (`services/notifications`). O mesmo comando já usado para a Fase 1+2 sobe os 4 codebases simultaneamente a partir da raiz do repositório:
    ```bash
    npx firebase-tools emulators:start
    ```
    Isso sobe Auth + Firestore + Functions (4 codebases) + Hosting (gateway, Módulo 11) no mesmo Emulator UI (`localhost:4000`), sempre contra o projeto demo `demo-gscandelari-ecommerce-api` — nunca um projeto real, mesma garantia já documentada para a Fase 1+2.
 3. Convenção de nomes de export por codebase (Firebase prefixa automaticamente pelo nome do codebase — Task 8.5.2): `orders-api`, `payments-api`, `notifications-onPedidoStatusChange`, sem colisão com a function `api` do codebase `default`.
-4. Enquanto os Módulos 8-11 (implementação) não estiverem prontos, cada serviço já pode ser exercitado isoladamente via sua própria suíte de testes (TDD — hoje "vermelha", por design, até a implementação correspondente existir):
+4. Cada serviço tem sua própria suíte de testes, lint e build, todos verdes (mesmo padrão do `ci-services.yml`):
    ```bash
    cd services/orders && npm run lint && npm run build && npm run test:coverage:emulator
    cd services/payments && npm run lint && npm run build && npm run test:coverage:emulator
    cd services/notifications && npm run lint && npm run build && npm run test:coverage:emulator
    ```
-   (`npm run lint` também falha hoje: cada serviço ainda não tem sua própria configuração de ESLint — isso é parte da Task 8.1.2, Módulo 8, ainda não executada.)
-5. Uma vez o fluxo crítico implementado (Módulos 8-11), o roteiro de validação local ponta a ponta é: criar pedido (Orders) → chamada interna síncrona a Payments cria a PaymentIntent → simular evento de webhook do Stripe (CLI `stripe listen`/`stripe trigger` apontando para o Payments local) → chamada interna síncrona de Payments a Orders efetiva a transição de status → Firestore Trigger dispara Notifications → e-mail via Resend (modo sandbox) — tudo dentro do emulador, sem tocar rede/projeto real além dos SDKs mockados nos testes automatizados.
+5. Roteiro de validação local ponta a ponta: criar pedido (Orders) → chamada interna síncrona a Payments cria a PaymentIntent → simular evento de webhook do Stripe (CLI `stripe listen`/`stripe trigger` apontando para o Payments local) → chamada interna síncrona de Payments a Orders efetiva a transição de status → Firestore Trigger dispara Notifications → e-mail via Resend (modo sandbox) — tudo dentro do emulador, sem tocar rede/projeto real além dos SDKs mockados nos testes automatizados.
 
 ### Segredo novo: `RESEND_API_KEY` (Resend, modo teste/sandbox)
 
@@ -404,11 +458,11 @@ Fase 3 introduz o primeiro segredo do serviço Notifications: a chave de API do 
 firebase functions:secrets:set RESEND_API_KEY
 # cole a chave de teste/sandbox (re_...) quando solicitado — nunca fica em texto no shell/histórico
 ```
-Será referenciado na definição da Cloud Function `onPedidoStatusChange` (opção `secrets`, 2ª geração) quando a Task 10.1.1 (Módulo 10) for implementada — mesmo mecanismo documentado em [Variáveis de ambiente e segredos](#variáveis-de-ambiente-e-segredos). Este segredo é configurado independentemente dos segredos já existentes de Payments (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`) e nunca precisa ser acessível por Orders ou Payments (princípio de menor privilégio, Task 9.1.4).
+Referenciado na definição da Cloud Function `onPedidoStatusChange` (opção `secrets`, 2ª geração) — mesmo mecanismo documentado em [Variáveis de ambiente e segredos](#variáveis-de-ambiente-e-segredos). Este segredo é configurado independentemente dos segredos já existentes de Payments (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`) e nunca precisa ser acessível por Orders ou Payments (princípio de menor privilégio, Task 9.1.4). Só é necessário configurá-lo de verdade (local ou produção) quando o corte de produção real da Fase 3 for executado — hoje, os testes automatizados usam exclusivamente o mock do SDK do Resend.
 
 ### Como testar o fluxo de notificação por e-mail manualmente
 
-Pré-requisito: Módulos 8-10 do `BACKLOG.md` implementados (Orders + Notifications rodando no emulador) e `RESEND_API_KEY` real (modo sandbox) configurada em `services/notifications/.env`.
+Pré-requisito: `RESEND_API_KEY` real (modo sandbox) configurada em `services/notifications/.env` (Orders + Notifications já rodam normalmente no emulador, ver seção acima).
 
 1. Suba o Emulator Suite multi-codebase (seção acima).
 2. Crie um usuário no Auth Emulator cujo e-mail seja o mesmo cadastrado na sua conta Resend (restrição do modo sandbox sem domínio verificado, ver acima) e crie um pedido autenticado via `POST /pedidos` (Orders).
@@ -419,10 +473,10 @@ Pré-requisito: Módulos 8-10 do `BACKLOG.md` implementados (Orders + Notificati
 
 ### Corte de produção — só como última etapa deliberada
 
-A Fase 3 **nunca** decomissiona o monólito como parte do trabalho normal desta branch. A sequência completa está detalhada no Épico 8.6 do `BACKLOG.md`; resumo:
+A Fase 3 **nunca** decomissiona o monólito como parte do trabalho normal de implementação. A sequência completa está detalhada no Épico 8.6 do `BACKLOG.md`; resumo:
 
-1. Todo o trabalho acontece isolado em `feat/fase-3-microservicos`, validado 100% localmente (Emulator Suite multi-codebase + suíte de testes por serviço) antes de qualquer deploy real.
-2. PR revisado e mesclado em `main` só depois da suíte completa verde (Módulo 12) — o merge em si **não** deploya nada (deploy continua manual via `workflow_dispatch`, decisão herdada das Fases 1/2, Task 4.5.1).
+1. Todo o trabalho aconteceu isolado em `feat/fase-3-microservicos`, validado 100% localmente (Emulator Suite multi-codebase + suíte de testes por serviço) antes de qualquer deploy real.
+2. PR revisado e mesclado em `main` (PR #1) só depois da suíte completa verde (Módulo 12) — o merge em si **não** deployou nada (deploy continua manual via `workflow_dispatch`, decisão herdada das Fases 1/2, Task 4.5.1). Esta etapa já está concluída.
 3. Deploy real dos 3 novos codebases + Hosting com `--only` explícito (`firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`) — **nunca** toca o codebase `default`; a function `api` da Fase 1+2 continua servindo tráfego real ininterruptamente durante e depois deste deploy.
 4. Smoke test completo em produção real pelo **novo** caminho, incluindo a migração manual da URL do webhook no Dashboard do Stripe (modo teste) para a nova URL pública de Payments.
 5. **Somente** depois do smoke test validado, o codebase `default` é removido de `firebase.json` e a function `api` é explicitamente deletada (`firebase functions:delete api`) — decomissionamento deliberado, nunca automático.
