@@ -10,7 +10,17 @@ export function getAdminApp(): admin.app.App {
     return admin.apps[0] as admin.app.App;
   }
 
+  const resolvedProjectId = process.env.GCLOUD_PROJECT || "demo-gscandelari-ecommerce-api";
+  console.log(
+    "[DEBUG] GCLOUD_PROJECT:",
+    process.env.GCLOUD_PROJECT,
+    "GOOGLE_CLOUD_PROJECT:",
+    process.env.GOOGLE_CLOUD_PROJECT,
+    "resolvedProjectId:",
+    resolvedProjectId,
+  );
+
   return admin.initializeApp({
-    projectId: process.env.GCLOUD_PROJECT || "demo-gscandelari-ecommerce-api",
+    projectId: resolvedProjectId,
   });
 }
