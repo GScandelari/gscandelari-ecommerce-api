@@ -1,0 +1,470 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "gscandelari-ecommerce-api",
+    "version": "3.0.0",
+    "description": "*[🇧🇷 Ler em português](/docs/)*\n\n# Overview\n\nA REST e-commerce API (Products, Orders, Payment, Cancellation/Refund) — portfolio project, running in real production. Microservices architecture: this document describes the public contract exposed by the **Orders** service, which holds every route a client of the API interacts with directly (`/produtos`, `/pedidos` — Portuguese names, kept as-is since they're the actual URL paths). A **Payments** service handles all Stripe integration (never called directly by you — see \"Payment flow\" below), and a **Notifications** service sends e-mail asynchronously when an order is confirmed or cancelled. All three sit behind a single public domain (Firebase Hosting as an API Gateway) — the URL you're using right now.\n\nFull source code, architecture diagram and deploy walkthrough: [GitHub repository](https://github.com/GScandelari/gscandelari-ecommerce-api). Every business rule (RN01–RN33) with acceptance criteria: [`SPEC.md`](https://github.com/GScandelari/gscandelari-ecommerce-api/blob/main/SPEC.md) (in Portuguese).\n\n# Authentication\n\nEvery endpoint below (except `GET /health`) requires a **Firebase ID Token** in the `Authorization: Bearer <token>` header. There's no API key — identity is always an authenticated Firebase Auth user (e-mail/password). Two things determine what you can do:\n\n- **Being authenticated** (any valid user) is already enough to browse products and create/view/cancel your own orders.\n- **Having the `admin: true` custom claim** on the token is required for product CRUD, freely changing an order's status, and processing refunds — the claim is the only source of authorization (never inferred any other way).\n\nTo try this documentation out via the **Authorize** button (top right): generate a real ID Token for a user of the `gscandelari-ecommerce-api` Firebase project via the [Identity Toolkit REST API](https://firebase.google.com/docs/reference/rest/auth#section-sign-in-email-password) (`accounts:signInWithPassword`) or the client SDK (`user.getIdToken()`), and paste the value (without the `Bearer` prefix) into the `bearerAuth` field. A token without the `admin` claim works normally for the non-administrative routes.\n\n# Payment flow (Stripe, always test mode)\n\nThis project **never processes real money** — every key and Dashboard used is test/sandbox mode. `POST /pedidos` creates the order **and** a Stripe PaymentIntent in the same call (RN10/RN16), returning `paymentClientSecret` in the response — that's what a real UI would use with Stripe.js/Elements to collect the card. **Payment confirmation does not happen in this call**: it arrives asynchronously via a signed Stripe webhook (`payment_intent.succeeded`/`payment_intent.payment_failed`), received by the Payments service and relayed internally to Orders (RN12/RN13/RN17) — only then does `status` become `confirmado` and `paymentStatus` become `pago`. In other words: right after creating an order, `GET /pedidos/{id}` may still show `paymentStatus: \"aguardando_pagamento\"` until that webhook is processed — that's expected, not a bug.\n\nTo actually exercise payment, confirm the PaymentIntent (using `paymentClientSecret`) with a [Stripe test card](https://docs.stripe.com/testing#cards) (e.g. `4242 4242 4242 4242` for success).\n\n# E-mail notification (Resend, best-effort)\n\nWhen `status` transitions to `confirmado` or `cancelado`, the Notifications service sends an e-mail to the order's owner (Resend, always sandbox mode) — this happens asynchronously and is **best-effort**: a delivery failure never reverts or delays the response of any endpoint below.\n\n# Out of scope for this document\n\n`POST /webhooks/stripe` (received by Payments, called by Stripe — never by you) and the internal `/internal/*` routes of Orders/Payments (service-to-service communication, authenticated with a Google-signed ID token/OIDC, not Firebase Auth) exist and are real, but aren't part of this API's public contract — that's why they don't appear as endpoints below. Full details in the \"Architecture\" section of the [README](https://github.com/GScandelari/gscandelari-ecommerce-api#arquitetura).",
+    "contact": {
+      "name": "Guilherme Scandelari",
+      "url": "https://gscandelari.com.br"
+    },
+    "license": { "name": "UNLICENSED" }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Same domain this documentation is hosted on — real production (API Gateway, Firebase Hosting) or the local Emulator Suite, depending on where /docs/en was accessed from."
+    }
+  ],
+  "tags": [
+    { "name": "System", "description": "Service health check" },
+    { "name": "Products", "description": "Product catalog (RN01, RN07)" },
+    { "name": "Orders", "description": "Orders, payment, cancellation and refund (RN02-RN09, RN07a, RN10, RN16, RN28-RN33)" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Firebase ID Token",
+        "description": "Token obtained via Firebase Auth. Admin-only routes require the admin:true custom claim."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "UNAUTHENTICATED",
+                  "FORBIDDEN",
+                  "NOT_FOUND",
+                  "VALIDATION_ERROR",
+                  "PAYMENT_GATEWAY_ERROR",
+                  "INTERNAL_ERROR"
+                ],
+                "example": "VALIDATION_ERROR"
+              },
+              "message": { "type": "string" },
+              "details": {
+                "description": "Present only for VALIDATION_ERROR originating from an invalid payload: the output of Zod's .flatten() (fieldErrors/formErrors)."
+              }
+            },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["error"]
+      },
+      "ProdutoInput": {
+        "type": "object",
+        "description": "Product fields (\"produto\" = product).",
+        "properties": {
+          "nome": { "type": "string", "minLength": 1, "example": "Camiseta", "description": "Product name." },
+          "preco": { "type": "number", "minimum": 0, "exclusiveMinimum": true, "example": 49.9, "description": "Price." },
+          "estoque": { "type": "integer", "minimum": 0, "example": 10, "description": "Stock quantity." }
+        },
+        "required": ["nome", "preco", "estoque"]
+      },
+      "Produto": {
+        "allOf": [
+          { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
+          { "$ref": "#/components/schemas/ProdutoInput" }
+        ]
+      },
+      "ItemPedidoInput": {
+        "type": "object",
+        "properties": {
+          "produtoId": { "type": "string", "description": "Product ID." },
+          "quantidade": { "type": "integer", "minimum": 0, "exclusiveMinimum": true, "example": 2, "description": "Quantity." }
+        },
+        "required": ["produtoId", "quantidade"]
+      },
+      "CriarPedidoInput": {
+        "type": "object",
+        "description": "Order creation payload (\"pedido\" = order).",
+        "properties": {
+          "itens": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/ItemPedidoInput" },
+            "description": "Order line items."
+          }
+        },
+        "required": ["itens"]
+      },
+      "ItemPedido": {
+        "type": "object",
+        "properties": {
+          "produtoId": { "type": "string" },
+          "quantidade": { "type": "integer" },
+          "precoUnitario": {
+            "type": "number",
+            "description": "Unit price at the moment the order was created (frozen — future changes to the product's price never affect orders already created)."
+          }
+        },
+        "required": ["produtoId", "quantidade", "precoUnitario"]
+      },
+      "PedidoStatus": {
+        "type": "string",
+        "description": "RN05: main flow pendente (pending) → confirmado (confirmed) → enviado (shipped) → entregue (delivered). Cancellation is reachable from pendente, confirmado or enviado — from enviado, it first becomes aguardando_devolucao (RN29), only then cancelado (RN30, Admin only). entregue and cancelado are terminal states. Values are kept in Portuguese — they're the literal strings the API returns.",
+        "enum": ["pendente", "confirmado", "enviado", "entregue", "aguardando_devolucao", "cancelado"]
+      },
+      "PaymentStatus": {
+        "type": "string",
+        "description": "RN10-RN15/RN31/RN32: independent of `status`. aguardando_pagamento (awaiting payment, initial) → pago (paid, on payment_intent.succeeded webhook) or falhou (failed, on payment_intent.payment_failed/canceled webhook — the order is also cancelled and stock restored). If an order with paymentStatus=pago is cancelled, it automatically becomes estorno_pendente (refund pending) — no call to Stripe happens at that moment. Only PATCH /pedidos/{id}/reembolsar (a manual Admin action) leads to reembolsado (refunded).",
+        "enum": ["aguardando_pagamento", "pago", "falhou", "estorno_pendente", "reembolsado"]
+      },
+      "Pedido": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "clienteId": { "type": "string", "description": "Firebase Auth uid of the customer who owns the order." },
+          "itens": { "type": "array", "items": { "$ref": "#/components/schemas/ItemPedido" } },
+          "total": { "type": "number" },
+          "status": { "$ref": "#/components/schemas/PedidoStatus" },
+          "paymentIntentId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Stripe PaymentIntent ID, created synchronously together with the order (RN16). Never null after a successful POST /pedidos."
+          },
+          "paymentClientSecret": {
+            "type": "string",
+            "nullable": true,
+            "description": "The PaymentIntent's client_secret — used by a real front-end with Stripe.js/Elements to collect the card and confirm payment. Never null after a successful POST /pedidos."
+          },
+          "paymentStatus": { "$ref": "#/components/schemas/PaymentStatus" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": [
+          "id",
+          "clienteId",
+          "itens",
+          "total",
+          "status",
+          "paymentIntentId",
+          "paymentClientSecret",
+          "paymentStatus",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "AlterarStatusInput": {
+        "type": "object",
+        "properties": { "status": { "$ref": "#/components/schemas/PedidoStatus" } },
+        "required": ["status"]
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing (`UNAUTHENTICATED`), invalid or expired authentication token.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Forbidden": {
+        "description": "Authenticated but not allowed to perform this action (`FORBIDDEN`) — missing the admin claim, or (on `/pedidos/{id}/cancelar`) the order belongs to a different customer.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "Resource not found (`NOT_FOUND`).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ValidationError": {
+        "description": "Invalid payload or a business rule was violated (`VALIDATION_ERROR`).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "PaymentGatewayError": {
+        "description": "Failed to communicate with the Payments service/Stripe (`PAYMENT_GATEWAY_ERROR`).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["System"],
+        "operationId": "health",
+        "summary": "Health check — the only endpoint without authentication",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "env": { "type": "string", "example": "production" }
+                  },
+                  "required": ["status", "env"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/produtos": {
+      "get": {
+        "tags": ["Products"],
+        "operationId": "listarProdutos",
+        "summary": "List all products",
+        "description": "Any authenticated user (RN09).",
+        "responses": {
+          "200": {
+            "description": "Product list.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Produto" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Products"],
+        "operationId": "criarProduto",
+        "summary": "Create a product",
+        "description": "Admin only (RN01, RN07).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ProdutoInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Product created.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/produtos/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["Products"],
+        "operationId": "obterProduto",
+        "summary": "Get a single product",
+        "description": "Any authenticated user (RN09).",
+        "responses": {
+          "200": {
+            "description": "Product found.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Products"],
+        "operationId": "atualizarProduto",
+        "summary": "Update a product",
+        "description": "Admin only (RN01, RN07). Fully replaces the product — every field of `ProdutoInput` is required in the body, this is not a partial PATCH.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ProdutoInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Product updated.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Products"],
+        "operationId": "removerProduto",
+        "summary": "Remove a product",
+        "description": "Admin only (RN07).",
+        "responses": {
+          "204": { "description": "Product removed." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos": {
+      "get": {
+        "tags": ["Orders"],
+        "operationId": "listarPedidos",
+        "summary": "List orders",
+        "description": "A customer sees only their own orders; an Admin sees all of them (RN08).",
+        "responses": {
+          "200": {
+            "description": "Order list.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Pedido" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Orders"],
+        "operationId": "criarPedido",
+        "summary": "Create an order and its Stripe PaymentIntent",
+        "description": "Decrements the stock of every item transactionally (RN02, RN03, RN04) and, in the same call, creates a real Stripe PaymentIntent (test mode) via a synchronous internal call to the Payments service (RN10, RN16) — see \"Payment flow\" in the general description of this documentation. `status` starts as `pendente` and `paymentStatus` starts as `aguardando_pagamento`; confirmation arrives later, asynchronously, via webhook.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CriarPedidoInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order and PaymentIntent created; stock for the items already decremented.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": {
+            "description": "Invalid payload, a product doesn't exist, or insufficient stock for some item (`VALIDATION_ERROR`, RN03).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "502": {
+            "description": "Failed to create the PaymentIntent with Stripe (`PAYMENT_GATEWAY_ERROR`) — the order that was just created is automatically cancelled and stock restored (compensation).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/pedidos/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["Orders"],
+        "operationId": "obterPedido",
+        "summary": "Get a single order",
+        "description": "Owning customer or Admin (RN08).",
+        "responses": {
+          "200": {
+            "description": "Order found.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos/{id}/status": {
+      "patch": {
+        "tags": ["Orders"],
+        "operationId": "alterarStatusPedido",
+        "summary": "Freely change an order's status",
+        "description": "Admin only (RN05, RN07, RN07a). Accepts any structurally valid transition of the state machine (see `PedidoStatus`) — including advancing the normal flow (`pendente→confirmado→enviado→entregue`) and confirming a return (`aguardando_devolucao→cancelado`, RN30). If the transition is to `cancelado` from `pendente` or `aguardando_devolucao`, the items' stock is restored (RN07a/RN30); if the order had `paymentStatus: \"pago\"`, it automatically becomes `estorno_pendente` (RN31, no call to Stripe happens at this point — see `PATCH /pedidos/{id}/reembolsar`).",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AlterarStatusInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": {
+            "description": "Structurally invalid status transition for the order's current state (`VALIDATION_ERROR`, RN05).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos/{id}/cancelar": {
+      "patch": {
+        "tags": ["Orders"],
+        "operationId": "cancelarPedido",
+        "summary": "Owning customer cancels their own order",
+        "description": "RN06, RN28, RN29 — behavior depends on the order's current `status`:\n- `pendente` or `confirmado` → becomes `cancelado` directly; stock restored; if `paymentStatus` was `pago`, it automatically becomes `estorno_pendente` (RN31).\n- `enviado` → becomes `aguardando_devolucao` (RN29) — the product is still physically with the customer; this transition does **not** restore stock nor change `paymentStatus`. Only an Admin can confirm the physical return afterwards (`PATCH /pedidos/{id}/status` to `cancelado`, RN30).\n- Any other status (`entregue`, `aguardando_devolucao`, `cancelado`) → 400.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order cancelled (or moved to aguardando_devolucao, if it was enviado).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": {
+            "description": "Order is not in a status the Customer can cancel — only `pendente`, `confirmado` or `enviado` (`VALIDATION_ERROR`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": {
+            "description": "The order belongs to a different customer (`FORBIDDEN`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pedidos/{id}/reembolsar": {
+      "patch": {
+        "tags": ["Orders"],
+        "operationId": "reembolsarPedido",
+        "summary": "Process a cancelled order's refund with Stripe",
+        "description": "Admin only (RN32) — a **manual, deliberate** action; no status transition ever triggers a refund automatically. Only allowed when `paymentStatus === \"estorno_pendente\"`. Calls `stripe.refunds.create` for the order's full total (no partial refunds) via the Payments service. Success → `paymentStatus: \"reembolsado\"` (the order's `status`, already `cancelado`, doesn't change). Failure calling Stripe → `paymentStatus` stays `estorno_pendente`, allowing a retry.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Refund confirmed by Stripe.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } }
+            }
+          },
+          "400": {
+            "description": "The order's paymentStatus is not estorno_pendente (`VALIDATION_ERROR`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "502": { "$ref": "#/components/responses/PaymentGatewayError" }
+        }
+      }
+    }
+  }
+}

@@ -26,6 +26,12 @@ async function applyLang(lang) {
     if (t[key] !== undefined) el.innerHTML = t[key];
   });
 
+  // Links para documentacao externa (ex.: Swagger /docs/ vs /docs/en/)
+  // que tem uma versao dedicada por idioma, em vez de texto traduzido.
+  document.querySelectorAll('[data-href-pt][data-href-en]').forEach(el => {
+    el.href = lang === 'pt' ? el.dataset.hrefPt : el.dataset.hrefEn;
+  });
+
   document.documentElement.lang = lang === 'pt' ? 'pt-BR' : 'en';
   localStorage.setItem('lang', lang);
   updateToggleButton(lang);
