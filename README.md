@@ -1,8 +1,8 @@
 # gscandelari-ecommerce-api
 
-API REST de e-commerce (Produtos, Pedidos, Clientes) — projeto de portfólio, em produção real.
+API REST de e-commerce (Produtos, Pedidos, Clientes). Projeto de portfólio, em produção real.
 
-Arquitetura de **microsserviços em Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com três serviços independentes (Orders, Payments, Notifications) atrás de um API Gateway (Firebase Hosting), autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims) e integração de pagamento real via **Stripe** (sempre em modo teste/sandbox). Ver a especificação completa em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
+Arquitetura de **microsserviços em Firebase Cloud Functions (2ª geração) + Express + TypeScript + Firestore**, com três serviços independentes (Orders, Payments, Notifications) atrás de um API Gateway (Firebase Hosting), autenticação via **Firebase Auth** (papéis `cliente`/`admin` via custom claims) e integração de pagamento real via **Stripe** (sempre em modo teste/sandbox). A especificação completa está em [`SPEC.md`](./SPEC.md) e o backlog de tasks em [`BACKLOG.md`](./BACKLOG.md).
 
 **No ar:** [`https://gscandelari-ecommerce-api.web.app`](https://gscandelari-ecommerce-api.web.app) · **Documentação interativa (Swagger UI):** [`/docs`](https://gscandelari-ecommerce-api.web.app/docs)
 
@@ -29,19 +29,19 @@ Arquitetura de **microsserviços em Firebase Cloud Functions (2ª geração) + E
 
 A API cobre o ciclo completo de um pedido de e-commerce:
 
-- **Catálogo de produtos** — CRUD completo, admin-only para escrita.
-- **Pedidos** — criação com decremento transacional de estoque, máquina de estados (`pendente → confirmado → enviado → entregue`, com ramos de cancelamento e devolução).
-- **Pagamento real (modo teste)** — cada pedido gera uma PaymentIntent no Stripe; confirmação/falha de pagamento chegam via webhook assinado, com idempotência.
-- **Cancelamento e reembolso** — cancelamento pelo Cliente ou Admin conforme o estado do pedido, com reembolso via Stripe sempre como ação manual e deliberada do Admin — nunca automática.
-- **Notificações** — e-mail (Resend) ao cliente quando o pedido é confirmado ou cancelado, best-effort (nunca bloqueia a transição de status).
-- **Autenticação e autorização** — Firebase Auth, com custom claim `admin` controlando rotas administrativas no backend (fonte real de verdade) e na UI.
-- **Documentação viva** — OpenAPI/Swagger em `/docs`, gerada a partir do código.
+- **Catálogo de produtos.** CRUD completo, admin-only para escrita.
+- **Pedidos.** Criação com decremento transacional de estoque, máquina de estados (`pendente → confirmado → enviado → entregue`, com ramos de cancelamento e devolução).
+- **Pagamento real (modo teste).** Cada pedido gera uma PaymentIntent no Stripe. Confirmação e falha de pagamento chegam via webhook assinado, com idempotência.
+- **Cancelamento e reembolso.** Cancelamento pelo Cliente ou Admin conforme o estado do pedido. Reembolso via Stripe é sempre ação manual e deliberada do Admin, nunca automática.
+- **Notificações.** E-mail (Resend) ao cliente quando o pedido é confirmado ou cancelado, best-effort: nunca bloqueia a transição de status.
+- **Autenticação e autorização.** Firebase Auth, com custom claim `admin` controlando rotas administrativas no backend (fonte real de verdade) e na UI.
+- **Documentação viva.** OpenAPI/Swagger em `/docs`, gerada a partir do código.
 
-Todo o código é testado com Jest + Supertest contra o Firebase Emulator Suite (Auth + Firestore reais localmente, nunca mocks para essas duas peças), com CI verde em todo PR/push para `main`.
+Todo o código é testado com Jest + Supertest contra o Firebase Emulator Suite (Auth e Firestore reais localmente, nunca mocks para essas duas peças), com CI verde em todo PR e push para `main`.
 
 ## Arquitetura
 
-Três serviços independentes, cada um seu próprio `package.json`/`tsconfig`/suíte de testes, atrás de um único domínio público:
+Três serviços independentes, cada um com seu próprio `package.json`, `tsconfig` e suíte de testes, atrás de um único domínio público:
 
 ```
                               ┌───────────────────────────┐
@@ -82,22 +82,22 @@ Três serviços independentes, cada um seu próprio `package.json`/`tsconfig`/su
                         └────────────────────────┘
 ```
 
-- **Orders** (`services/orders/`): dono exclusivo da coleção `pedidos`. Expõe `/produtos` e `/pedidos` (público) e `/internal/pedidos/:id/confirmar-pagamento` + `/internal/pedidos/:id/cancelar-por-falha-pagamento` (interno, só chamado por Payments, protegido por ID token Google — RN17/RN18).
-- **Payments** (`services/payments/`): toda a integração com o Stripe vive aqui. Expõe `/webhooks/stripe` (público, Dashboard do Stripe) e `/internal/payment-intents` + `/internal/refunds` (interno, só chamado por Orders — RN16/RN18). Nunca escreve na coleção `pedidos`.
-- **Notifications** (`services/notifications/`): sem nenhuma rota HTTP pública ou interna (RN20). Reage a mudanças de `status` em `pedidos` via Firestore Trigger (`onDocumentUpdated`) e envia e-mail (Resend, sempre modo teste/sandbox) quando o pedido é confirmado ou cancelado — best-effort, nunca reverte a transição já efetivada por Orders (RN19).
-- **API Gateway** (Firebase Hosting `rewrites`): único domínio público, roteando `/produtos`/`/pedidos` → Orders e `/webhooks/stripe` → Payments (RN20).
-- Comunicação **Orders ↔ Payments**: HTTP síncrona interna, autenticada via ID token assinado pelo Google (OIDC nativo do GCP, não Firebase Auth) — RN18, verificado contra um allow-list de e-mail de service account. Cada serviço roda sob sua própria service account de runtime, com o mínimo de permissão IAM necessária (`orders-runtime@`, `payments-runtime@`). Comunicação para **Notifications**: assíncrona via Firestore Trigger, fire-and-forget.
+- **Orders** (`services/orders/`): dono exclusivo da coleção `pedidos`. Expõe `/produtos` e `/pedidos` (público) e `/internal/pedidos/:id/confirmar-pagamento` + `/internal/pedidos/:id/cancelar-por-falha-pagamento` (interno, só chamado por Payments, protegido por ID token Google, RN17/RN18).
+- **Payments** (`services/payments/`): toda a integração com o Stripe vive aqui. Expõe `/webhooks/stripe` (público, Dashboard do Stripe) e `/internal/payment-intents` + `/internal/refunds` (interno, só chamado por Orders, RN16/RN18). Nunca escreve na coleção `pedidos`.
+- **Notifications** (`services/notifications/`): sem nenhuma rota HTTP pública ou interna (RN20). Reage a mudanças de `status` em `pedidos` via Firestore Trigger (`onDocumentUpdated`) e envia e-mail (Resend, sempre modo teste/sandbox) quando o pedido é confirmado ou cancelado. Best-effort: nunca reverte a transição já efetivada por Orders (RN19).
+- **API Gateway** (Firebase Hosting `rewrites`): único domínio público, roteando `/produtos`/`/pedidos` para Orders e `/webhooks/stripe` para Payments (RN20).
+- Comunicação **Orders ↔ Payments**: HTTP síncrona interna, autenticada via ID token assinado pelo Google (OIDC nativo do GCP, não Firebase Auth, RN18), verificado contra uma allow-list de e-mail de service account. Cada serviço roda sob sua própria service account de runtime, com o mínimo de permissão IAM necessária (`orders-runtime@`, `payments-runtime@`). Comunicação para **Notifications**: assíncrona via Firestore Trigger, fire-and-forget.
 
 ## Pré-requisitos
 
 - [Node.js 20](https://nodejs.org/) (mesma versão declarada em `engines.node` de cada serviço e usada pelo runtime das Cloud Functions)
 - npm (instalado junto com o Node.js)
-- Java 21+ (exigido pelo Firestore/Auth Emulator na versão atual do `firebase-tools` — verifique com `java -version`)
-- Não é necessário instalar o Firebase CLI globalmente: ele é uma devDependency de cada serviço (`firebase-tools`) e é usado via `npx firebase-tools` nos scripts do `npm` e no CI. Se preferir usar um CLI global (`npm install -g firebase-tools`), ele também funciona.
+- Java 21+, exigido pelo Firestore/Auth Emulator na versão atual do `firebase-tools` (verifique com `java -version`)
+- Não é necessário instalar o Firebase CLI globalmente. Ele é uma devDependency de cada serviço (`firebase-tools`) e é usado via `npx firebase-tools` nos scripts do `npm` e no CI. Se preferir um CLI global (`npm install -g firebase-tools`), também funciona.
 
 ## Como rodar localmente
 
-Os emuladores usam sempre o projeto Firebase de demonstração `demo-gscandelari-ecommerce-api`, **nunca** um projeto real — isso é automático via `singleProjectMode` em `firebase.json` e o prefixo `demo-` (reconhecido pelo Firebase CLI como "não é um projeto real, não requer credenciais nem gera cobrança").
+Os emuladores usam sempre o projeto Firebase de demonstração `demo-gscandelari-ecommerce-api`, **nunca** um projeto real. Isso é automático via `singleProjectMode` em `firebase.json` e o prefixo `demo-` (reconhecido pelo Firebase CLI como "não é um projeto real, não requer credenciais nem gera cobrança").
 
 1. Instalar as dependências de cada serviço (independentes entre si, cada um com seu próprio `package.json`/`package-lock.json`):
    ```bash
@@ -115,7 +115,7 @@ Os emuladores usam sempre o projeto Firebase de demonstração `demo-gscandelari
    - Functions Emulator (`ordersApi`, `paymentsApi`, `onPedidoStatusChange`): `localhost:5001`
    - Hosting Emulator (API Gateway): `localhost:5000`
    - Emulator UI: `localhost:4000`
-3. Testar a API rodando (via Hosting, mesma URL que a produção usa) ou diretamente na function do Emulator:
+3. Testar a API rodando, via Hosting (mesma URL que a produção usa) ou direto na function do Emulator:
    ```bash
    curl http://localhost:5000/health
    # ou, direto na function:
@@ -123,11 +123,11 @@ Os emuladores usam sempre o projeto Firebase de demonstração `demo-gscandelari
    ```
 4. Documentação interativa (Swagger UI): abra `http://localhost:5000/docs` no navegador.
 
-Como cada serviço exporta seu app Express puro (`src/app.ts`), ele também pode ser exercitado diretamente via Supertest nos testes (ver seção seguinte) sem precisar do Functions Emulator — mas para o fluxo real de ponta a ponta (Auth/Firestore/comunicação interna entre serviços), use `emulators:start` como acima.
+Cada serviço exporta seu app Express puro (`src/app.ts`), então também dá pra exercitá-lo direto via Supertest nos testes (ver seção seguinte), sem precisar do Functions Emulator. Mas para o fluxo real de ponta a ponta — Auth, Firestore, comunicação interna entre serviços — use `emulators:start` como acima.
 
 ### Roteiro de validação local ponta a ponta
 
-Criar pedido (Orders) → chamada interna síncrona a Payments cria a PaymentIntent (RN16) → simular evento de webhook do Stripe ([Stripe CLI](https://docs.stripe.com/stripe-cli) `stripe listen`/`stripe trigger` apontando para Payments local) → chamada interna síncrona de Payments a Orders efetiva a transição de status (RN17) → Firestore Trigger dispara Notifications → e-mail via Resend (modo sandbox) — tudo dentro do emulador, sem tocar rede/projeto real além dos SDKs mockados nos testes automatizados.
+Criar pedido no Orders. A chamada interna síncrona a Payments cria a PaymentIntent (RN16). Simular um evento de webhook do Stripe ([Stripe CLI](https://docs.stripe.com/stripe-cli) `stripe listen`/`stripe trigger` apontando para Payments local). A chamada interna síncrona de Payments a Orders efetiva a transição de status (RN17). O Firestore Trigger dispara Notifications, que manda e-mail via Resend (modo sandbox). Tudo dentro do emulador, sem tocar rede ou projeto real além dos SDKs mockados nos testes automatizados.
 
 ## Variáveis de ambiente e segredos
 
@@ -135,7 +135,7 @@ Criar pedido (Orders) → chamada interna síncrona a Payments cria a PaymentInt
 
 ### Local / desenvolvimento (Emulator Suite)
 
-Ao rodar via `emulators:start` ou `emulators:exec`, o Firebase CLI injeta automaticamente as variáveis abaixo nos processos filhos — **nada precisa ser configurado manualmente**:
+Ao rodar via `emulators:start` ou `emulators:exec`, o Firebase CLI injeta automaticamente as variáveis abaixo nos processos filhos. **Nada precisa ser configurado manualmente:**
 
 | Variável | Descrição |
 |---|---|
@@ -143,11 +143,11 @@ Ao rodar via `emulators:start` ou `emulators:exec`, o Firebase CLI injeta automa
 | `FIREBASE_AUTH_EMULATOR_HOST` | Host:porta do Auth Emulator (`localhost:9099`) |
 | `GCLOUD_PROJECT` | ID do projeto Firebase (demo) |
 
-Cada serviço também tem seu próprio `.env.example` (`services/<serviço>/.env.example`) documentando as variáveis específicas — comunicação interna (URLs/e-mails de service account), flags de conveniência para o emulador, etc.
+Cada serviço também tem seu próprio `.env.example` (`services/<serviço>/.env.example`), documentando as variáveis específicas: comunicação interna (URLs/e-mails de service account), flags de conveniência para o emulador, e assim por diante.
 
 ### Segredos de aplicação (runtime, projeto real)
 
-Todos sempre em **modo teste/sandbox** (nunca chaves de modo live/produção — este projeto de portfólio nunca processa dinheiro real nem envia e-mail para destinatários fora de teste):
+Todos sempre em **modo teste/sandbox**, nunca chaves de modo live/produção. Este projeto de portfólio não processa dinheiro real nem envia e-mail para destinatários fora de teste:
 
 | Variável | Descrição | Onde é usada |
 |---|---|---|
@@ -162,20 +162,20 @@ firebase functions:secrets:set NOME_DO_SEGREDO
 # valor é digitado interativamente, nunca fica em texto no shell/histórico
 ```
 
-e referenciado no código via a opção `secrets` do `onRequest`/`onDocumentUpdated` (2ª geração), conforme a [documentação oficial do Firebase](https://firebase.google.com/docs/functions/config-env?gen=2#secret-manager). Ver [Integração de pagamento (Stripe)](#integração-de-pagamento-stripe) e [Notificações por e-mail (Resend)](#notificações-por-e-mail-resend) abaixo para o passo a passo completo.
+Fica referenciado no código via a opção `secrets` do `onRequest`/`onDocumentUpdated` (2ª geração), conforme a [documentação oficial do Firebase](https://firebase.google.com/docs/functions/config-env?gen=2#secret-manager). O passo a passo completo está em [Integração de pagamento (Stripe)](#integração-de-pagamento-stripe) e [Notificações por e-mail (Resend)](#notificações-por-e-mail-resend), mais abaixo.
 
 ### Config não-secreta por projeto (`.env.<project-id>`)
 
-`services/orders/.env.gscandelari-ecommerce-api` e `services/payments/.env.gscandelari-ecommerce-api` são **commitados** (convenção nativa do Firebase Functions 2ª geração: só carregado quando o deploy/runtime alvo é esse projeto real específico, nunca no emulador). Contêm URLs de comunicação interna e e-mails de service account — não são segredo, por isso versionados ao contrário dos demais `.env*`.
+`services/orders/.env.gscandelari-ecommerce-api` e `services/payments/.env.gscandelari-ecommerce-api` são **commitados** (convenção nativa do Firebase Functions 2ª geração: só é carregado quando o deploy ou runtime alvo é esse projeto real específico, nunca no emulador). Contêm URLs de comunicação interna e e-mails de service account. Não é segredo, por isso está versionado, ao contrário dos demais `.env*`.
 
 ### Front-end (`web/`) — variáveis de build (Vite)
 
-O front-end de testes (ver [seção dedicada](#front-end-de-testes--web) abaixo) usa suas próprias variáveis, documentadas em `web/.env.example` — nenhuma delas é um segredo de runtime como as do Stripe acima (a chave publicável do Stripe é, por definição, feita para ser exposta em código de browser), mas seguem a mesma convenção de nunca serem commitadas com valor real.
+O front-end de testes (ver [seção dedicada](#front-end-de-testes--web) mais abaixo) usa suas próprias variáveis, documentadas em `web/.env.example`. Nenhuma delas é um segredo de runtime como as do Stripe acima (a chave publicável do Stripe é, por definição, feita para ser exposta em código de browser), mas seguem a mesma convenção de nunca serem commitadas com valor real.
 
 | Variável | Descrição |
 |---|---|
-| `VITE_FIREBASE_PROJECT_ID` | Sempre `demo-gscandelari-ecommerce-api` — deve começar com `demo-` (RN27); `src/lib/firebase.ts` recusa inicializar e interrompe o boot se essa condição não for atendida |
-| `VITE_FIREBASE_API_KEY` / `VITE_FIREBASE_AUTH_DOMAIN` / `VITE_FIREBASE_APP_ID` | Config do Firebase Web App exigida pelo SDK do client (`initializeApp`); como o app só fala com o Auth Emulator, valores placeholder funcionam sem necessidade de um Web App real cadastrado no Console |
+| `VITE_FIREBASE_PROJECT_ID` | Sempre `demo-gscandelari-ecommerce-api`, deve começar com `demo-` (RN27). `src/lib/firebase.ts` recusa inicializar e interrompe o boot se essa condição não for atendida |
+| `VITE_FIREBASE_API_KEY` / `VITE_FIREBASE_AUTH_DOMAIN` / `VITE_FIREBASE_APP_ID` | Config do Firebase Web App exigida pelo SDK do client (`initializeApp`). Como o app só fala com o Auth Emulator, valores placeholder funcionam sem precisar de um Web App real cadastrado no Console |
 | `VITE_AUTH_EMULATOR_URL` | URL do Auth Emulator (`http://localhost:9099`), usada por `connectAuthEmulator` |
 | `VITE_API_BASE_URL` | URL base da function `ordersApi` (única que expõe `/produtos`/`/pedidos`) servida pelo Functions Emulator |
 | `VITE_STRIPE_PUBLISHABLE_KEY` | Chave publicável de **teste** do Stripe (`pk_test_...`), mesma conta usada para `STRIPE_SECRET_KEY` (ver acima) |
@@ -184,7 +184,7 @@ Copie `web/.env.example` para `web/.env` antes de rodar `npm run dev` em `web/`.
 
 ### Credenciais de deploy (CI/CD)
 
-Para o workflow de deploy (`.github/workflows/deploy-services.yml`) autenticar no Firebase, é necessário o GitHub Actions Secret abaixo — **já configurado** neste repositório:
+Para o workflow de deploy (`.github/workflows/deploy-services.yml`) autenticar no Firebase, é necessário o GitHub Actions Secret abaixo, **já configurado** neste repositório:
 
 | Secret | Descrição |
 |---|---|
@@ -265,9 +265,9 @@ npm run format:check    # Prettier (use `npm run format` para corrigir)
 
 Workflows em `.github/workflows/`:
 
-- **`ci-services.yml`** — roda lint/build/test **de forma independente** para cada um dos 3 serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, em todo Pull Request e todo push para `main`. Nenhuma etapa toca um projeto Firebase real. **Check obrigatório** configurado na proteção da branch `main` (ver `CONTRIBUTING.md`).
-- **`deploy-services.yml`** — deploy manual (`workflow_dispatch`, campo de confirmação obrigatório, `environment: production`) para os 3 codebases + Hosting: reexecuta lint/build/test antes de `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`.
-- **`ci-web.yml`** — mesmo padrão de `ci-services.yml`, aplicado a `web/`: `npm ci`, lint, `format:check` (Prettier), build (TypeScript + Vite) e testes (Vitest + React Testing Library, com `fetch`/Firebase Auth mockados — nunca depende do Emulator Suite rodando em CI). **Sem step de deploy** — `web/` não é publicada (uso local/experimentação contra o Emulator Suite). Não é um check obrigatório de branch protection.
+- **`ci-services.yml`**: roda lint/build/test **de forma independente** para cada um dos 3 serviços (`services/orders/`, `services/payments/`, `services/notifications/`), via matrix job, em todo Pull Request e todo push para `main`. Nenhuma etapa toca um projeto Firebase real. **Check obrigatório** configurado na proteção da branch `main` (ver `CONTRIBUTING.md`).
+- **`deploy-services.yml`**: deploy manual (`workflow_dispatch`, campo de confirmação obrigatório, `environment: production`) para os 3 codebases + Hosting. Reexecuta lint/build/test antes de `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`.
+- **`ci-web.yml`**: mesmo padrão de `ci-services.yml`, aplicado a `web/`. `npm ci`, lint, `format:check` (Prettier), build (TypeScript + Vite) e testes (Vitest + React Testing Library, com `fetch`/Firebase Auth mockados, nunca depende do Emulator Suite rodando em CI). **Sem step de deploy**: `web/` não é publicada, é uso local/experimentação contra o Emulator Suite. Não é um check obrigatório de branch protection.
 
 ## Deploy
 
@@ -275,33 +275,33 @@ Workflows em `.github/workflows/`:
 
 - **Projeto Firebase (Blaze):** `gscandelari-ecommerce-api` ([console](https://console.firebase.google.com/project/gscandelari-ecommerce-api/overview)), alias `production` em `.firebaserc`.
 - **API Gateway (Firebase Hosting):** `https://gscandelari-ecommerce-api.web.app` (`/produtos`, `/pedidos`, `/docs`, `/health`, `/webhooks/stripe`).
-- **Política de limpeza do Artifact Registry** configurada (`firebase functions:artifacts:setpolicy`, imagens de container antigas removidas após 1 dia) — evita custo de armazenamento acumulado.
+- **Política de limpeza do Artifact Registry** configurada (`firebase functions:artifacts:setpolicy`, imagens de container antigas removidas após 1 dia), pra evitar custo de armazenamento acumulado.
 - **Deploy via GitHub Actions** (`deploy-services.yml`): `workflow_dispatch`, secret `FIREBASE_SERVICE_ACCOUNT_KEY` configurado, reexecuta lint/build/test dos 3 serviços antes de `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`.
 - **Branch protection** ativa em `main` (PR obrigatório + check de CI obrigatório).
-- Segredos do Stripe (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, modo teste) e do Resend (`RESEND_API_KEY`, modo sandbox) configurados no Firebase Secret Manager, acessíveis apenas pelas service accounts de runtime que precisam deles (`payments-runtime@` para o Stripe; a function de Notifications para o Resend).
-- Cada função HTTPS/trigger roda sob sua própria service account de runtime, com o mínimo de permissão IAM necessária (`orders-runtime@`, `payments-runtime@`) — nunca a service account default do Compute Engine.
-- **Validado de ponta a ponta em produção real** (modo teste do Stripe): pedido criado → PaymentIntent real via chamada interna Orders→Payments (RN16) → pago via cartão de teste → webhook do Stripe confirmou o pedido via chamada interna Payments→Orders (RN17) → e-mail real via Resend confirmado no destinatário → cancelamento → reembolso via `PATCH /pedidos/:id/reembolsar`, refund `succeeded` conferido diretamente na API do Stripe. Dados de teste usados nessa validação foram removidos depois.
+- Segredos do Stripe (`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, modo teste) e do Resend (`RESEND_API_KEY`, modo sandbox) configurados no Firebase Secret Manager, acessíveis apenas pelas service accounts de runtime que precisam deles: `payments-runtime@` para o Stripe, a function de Notifications para o Resend.
+- Cada função HTTPS/trigger roda sob sua própria service account de runtime, com o mínimo de permissão IAM necessária (`orders-runtime@`, `payments-runtime@`). Nunca a service account default do Compute Engine.
+- **Validado de ponta a ponta em produção real** (modo teste do Stripe): pedido criado, PaymentIntent real via chamada interna Orders→Payments (RN16), pago via cartão de teste, webhook do Stripe confirmou o pedido via chamada interna Payments→Orders (RN17), e-mail real via Resend confirmado no destinatário, cancelamento, reembolso via `PATCH /pedidos/:id/reembolsar` com refund `succeeded` conferido diretamente na API do Stripe. Os dados de teste usados nessa validação foram removidos depois.
 
 **Papéis da Service Account de deploy** (`github-actions-deploy@gscandelari-ecommerce-api.iam.gserviceaccount.com`): Cloud Functions Admin, Cloud Run Admin, Artifact Registry Administrator, Cloud Build Editor, Service Account User, Firebase Admin, Service Usage Admin, Secret Manager Secret Accessor, Secret Manager Admin.
 
 ### Pré-requisitos de provisionamento de um projeto Firebase real do zero
 
-Passo único, manual, via Console — nenhum deles é necessário para os Emulators locais (que já vêm com Auth/Firestore prontos por padrão):
+Passo único, manual, via Console. Nenhum deles é necessário para os Emulators locais, que já vêm com Auth/Firestore prontos por padrão:
 
-1. **Firebase Authentication** — habilitar em Console > Authentication > "Get started" > provedor **Email/senha**.
-2. **Cloud Firestore API** — habilitar em [console.developers.google.com/apis/api/firestore.googleapis.com](https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=gscandelari-ecommerce-api).
-3. **Banco de dados Firestore** — Console > Firestore Database > "Create database", modo **Native**, mesma região das Cloud Functions (`us-central1`). O ID do banco deve ficar literalmente `(default)` — o Admin SDK só enxerga esse nome sem configuração adicional; um ID customizado causa `NOT_FOUND` silencioso.
-4. **`firestore.rules`/`firestore.indexes.json`** — `firebase deploy --only firestore --project production`. O Admin SDK (usado por toda a API) ignora as rules de qualquer forma, mas deployá-las fecha o acesso via Client SDK, postura de segurança pretendida.
+1. **Firebase Authentication.** Habilitar em Console > Authentication > "Get started" > provedor **Email/senha**.
+2. **Cloud Firestore API.** Habilitar em [console.developers.google.com/apis/api/firestore.googleapis.com](https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=gscandelari-ecommerce-api).
+3. **Banco de dados Firestore.** Console > Firestore Database > "Create database", modo **Native**, mesma região das Cloud Functions (`us-central1`). O ID do banco precisa ficar literalmente `(default)`. O Admin SDK só enxerga esse nome sem configuração adicional; um ID customizado causa `NOT_FOUND` silencioso.
+4. **`firestore.rules`/`firestore.indexes.json`.** `firebase deploy --only firestore --project production`. O Admin SDK (usado por toda a API) ignora as rules de qualquer forma, mas deployá-las fecha o acesso via Client SDK, que é a postura de segurança pretendida.
 
 ### Decisão registrada: deploy MANUAL
 
-O deploy a partir de `main` é **manual**, disparado via `workflow_dispatch` (botão "Run workflow" no GitHub Actions, com um campo de confirmação obrigatório) ou via CLI local, e **não** automático a cada merge em `main`. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo ainda assim `main` sempre *deployável* (princípio central do GitHub Flow).
+O deploy a partir de `main` é **manual**, disparado via `workflow_dispatch` (botão "Run workflow" no GitHub Actions, com um campo de confirmação obrigatório) ou via CLI local. Nunca automático a cada merge em `main`. Um gatilho manual dá a um humano a chance de decidir *quando* colocar uma versão em produção, mantendo `main` sempre *deployável* — princípio central do GitHub Flow.
 
 ### Deploy manual via GitHub Actions
 
 1. Garanta que `main` está com o CI verde (badge/check do workflow `ci-services.yml`).
 2. Vá em GitHub > Actions > workflow **"Deploy Microsserviços"** > "Run workflow", selecione a branch `main`, digite `deploy` no campo de confirmação e execute.
-3. O workflow reexecuta lint + build + testes dos 3 serviços antes de deployar e então roda `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`.
+3. O workflow reexecuta lint, build e testes dos 3 serviços antes de deployar, e então roda `firebase deploy --only functions:orders,functions:payments,functions:notifications,hosting`.
 
 ### Deploy manual via Firebase CLI (local)
 
@@ -312,7 +312,7 @@ cd services/notifications && npm run build && npm run test:emulator && cd ../..
 npx firebase-tools deploy --only functions:orders,functions:payments,functions:notifications,hosting --project production
 ```
 
-Nunca rode `firebase deploy` apontando para o alias `default`/demo — ele existe apenas para os emuladores.
+Nunca rode `firebase deploy` apontando para o alias `default`/demo. Ele existe só para os emuladores.
 
 ## Integração de pagamento (Stripe)
 
@@ -320,12 +320,12 @@ Nunca rode `firebase deploy` apontando para o alias `default`/demo — ele exist
 
 ### Como obter as chaves de teste do Stripe
 
-1. Crie (ou acesse) uma conta em [dashboard.stripe.com](https://dashboard.stripe.com/register). Não é necessário completar a ativação da conta (dados bancários, etc.) para usar o modo teste.
-2. No Dashboard, confirme que o toggle **"Test mode"** (canto superior direito) está **ativado** — todas as chaves e eventos gerados nesse modo são de sandbox, sem qualquer cobrança real.
+1. Crie (ou acesse) uma conta em [dashboard.stripe.com](https://dashboard.stripe.com/register). Não precisa completar a ativação da conta (dados bancários etc.) para usar o modo teste.
+2. No Dashboard, confirme que o toggle **"Test mode"** (canto superior direito) está **ativado**. Todas as chaves e eventos gerados nesse modo são de sandbox, sem qualquer cobrança real.
 3. Vá em **Developers > API keys**. Copie a **Secret key** de teste, que sempre começa com `sk_test_...` (nunca use a chave que começa com `sk_live_...` neste projeto).
-4. O **Webhook signing secret** (`whsec_...`) só é gerado depois de cadastrar o endpoint de webhook — ver a subseção ["Configurar a URL do webhook no Dashboard do Stripe"](#configurar-a-url-do-webhook-no-dashboard-do-stripe-modo-teste) abaixo.
+4. O **Webhook signing secret** (`whsec_...`) só é gerado depois de cadastrar o endpoint de webhook. Ver a subseção ["Configurar a URL do webhook no Dashboard do Stripe"](#configurar-a-url-do-webhook-no-dashboard-do-stripe-modo-teste) abaixo.
 
-Nunca cole uma chave de teste (ou, com muito mais razão, uma chave live) diretamente em código, commit, PR, issue ou log. Ela deve ir **somente** para o `.env` local (ignorado pelo git) ou para o Firebase Secret Manager.
+Nunca cole uma chave de teste, ou com muito mais razão uma chave live, diretamente em código, commit, PR, issue ou log. Ela vai **somente** para o `.env` local (ignorado pelo git) ou para o Firebase Secret Manager.
 
 ### Configuração local (Emulator Suite)
 
@@ -334,8 +334,8 @@ Nunca cole uma chave de teste (ou, com muito mais razão, uma chave live) direta
    cd services/payments
    cp .env.example .env
    ```
-2. Edite `services/payments/.env` e preencha `STRIPE_SECRET_KEY` com a sua chave de teste (`sk_test_...`) obtida acima. Para `STRIPE_WEBHOOK_SECRET`, veja a subseção de webhook abaixo — durante desenvolvimento local sem receber webhooks reais, o valor placeholder do `.env.example` é suficiente (os testes Jest nunca usam esse valor: o SDK do Stripe é sempre mockado).
-3. O Firebase Functions (2ª geração) carrega `services/payments/.env` automaticamente ao rodar via `emulators:start`/`emulators:exec` — nenhuma outra configuração é necessária.
+2. Edite `services/payments/.env` e preencha `STRIPE_SECRET_KEY` com a sua chave de teste (`sk_test_...`) obtida acima. Para `STRIPE_WEBHOOK_SECRET`, veja a subseção de webhook abaixo. Durante desenvolvimento local sem receber webhooks reais, o valor placeholder do `.env.example` já é suficiente (os testes Jest nunca usam esse valor: o SDK do Stripe é sempre mockado).
+3. O Firebase Functions (2ª geração) carrega `services/payments/.env` automaticamente ao rodar via `emulators:start`/`emulators:exec`. Nenhuma outra configuração é necessária.
 
 ### Configuração em produção (Firebase Secret Manager)
 
@@ -351,7 +351,7 @@ Os dois segredos já estão referenciados na definição da Cloud Function (opç
 
 ### Cartões de teste do Stripe
 
-Para testar o fluxo de pagamento manualmente (via `client_secret` retornado por `POST /pedidos` e Stripe.js/Elements, ou via chamadas diretas de teste), use os [cartões de teste oficiais do Stripe](https://docs.stripe.com/testing#cards) — funcionam **somente** em modo teste, com qualquer data de validade futura, qualquer CVC de 3 dígitos e qualquer CEP:
+Para testar o fluxo de pagamento manualmente (via `client_secret` retornado por `POST /pedidos` e Stripe.js/Elements, ou via chamadas diretas de teste), use os [cartões de teste oficiais do Stripe](https://docs.stripe.com/testing#cards). Funcionam **somente** em modo teste, com qualquer data de validade futura, qualquer CVC de 3 dígitos e qualquer CEP:
 
 | Número do cartão | Comportamento simulado |
 |---|---|
@@ -364,14 +364,14 @@ Para testar o fluxo de pagamento manualmente (via `client_secret` retornado por 
 
 1. No [Dashboard do Stripe](https://dashboard.stripe.com), com o toggle **"Test mode"** ativado, vá em **Developers > Webhooks > Add endpoint**.
 2. Em **Endpoint URL**, informe a URL pública do gateway: `https://gscandelari-ecommerce-api.web.app/webhooks/stripe`.
-3. Em **Events to listen to**, selecione `payment_intent.succeeded`, `payment_intent.payment_failed` e `payment_intent.canceled` (RN12/RN13 do `SPEC.md`); outros eventos podem ser adicionados sem quebrar nada (tipos não mapeados são tratados como no-op).
-4. Salve o endpoint. O Stripe exibe o **Signing secret** (`whsec_...`) na página de detalhes do endpoint criado — clique em "Reveal" para visualizá-lo.
+3. Em **Events to listen to**, selecione `payment_intent.succeeded`, `payment_intent.payment_failed` e `payment_intent.canceled` (RN12/RN13 do `SPEC.md`). Outros eventos podem ser adicionados sem quebrar nada, tipos não mapeados são tratados como no-op.
+4. Salve o endpoint. O Stripe exibe o **Signing secret** (`whsec_...`) na página de detalhes do endpoint criado. Clique em "Reveal" para visualizá-lo.
 5. Copie esse valor e configure-o em produção com `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET`. Se o endpoint for recriado ou o secret for "rolado" (rotate) no Dashboard, repita este passo com o novo valor.
 6. Para testar localmente sem expor o emulador publicamente, use o [Stripe CLI](https://docs.stripe.com/stripe-cli) (`stripe listen --forward-to localhost:5001/demo-gscandelari-ecommerce-api/us-central1/paymentsApi/webhooks/stripe`), que gera seu próprio signing secret de teste temporário para colocar no `.env` local.
 
 ## Notificações por e-mail (Resend)
 
-`services/notifications/` envia e-mail de confirmação/cancelamento de pedido (RN19) via [Resend](https://resend.com), sempre em modo teste/sandbox — este projeto de portfólio nunca envia e-mail para destinatários reais fora de teste.
+`services/notifications/` envia e-mail de confirmação/cancelamento de pedido (RN19) via [Resend](https://resend.com), sempre em modo teste/sandbox. Este projeto de portfólio não envia e-mail para destinatários reais fora de teste.
 
 **Como obter (gratuito, sem cartão de crédito, sem verificar domínio):**
 1. Crie uma conta em [resend.com/signup](https://resend.com/signup).
@@ -391,14 +391,14 @@ Os testes Jest de Notifications nunca usam esse valor real: o SDK do Resend é s
 firebase functions:secrets:set RESEND_API_KEY
 ```
 
-> **Nota de implementação:** o SDK do Resend não lança exceção em erros de nível de API — `emails.send()` devolve `{ data: null, error }` em vez de lançar. O trigger `onPedidoStatusChange.ts` checa esse campo explicitamente e loga via `console.error` quando presente, sem propagar (best-effort, RN19: nunca bloqueia a transição de status, que já foi efetivada por Orders).
+> **Nota de implementação:** o SDK do Resend não lança exceção em erros de nível de API. `emails.send()` devolve `{ data: null, error }` em vez de lançar. O trigger `onPedidoStatusChange.ts` checa esse campo explicitamente e loga via `console.error` quando presente, sem propagar (best-effort, RN19: nunca bloqueia a transição de status, que já foi efetivada por Orders).
 
 ### Como testar o fluxo de notificação por e-mail manualmente
 
 1. Suba o Emulator Suite (seção acima), com `RESEND_API_KEY` real configurada em `services/notifications/.env`.
 2. Crie um usuário no Auth Emulator cujo e-mail seja o mesmo cadastrado na sua conta Resend (restrição do modo sandbox) e crie um pedido autenticado via `POST /pedidos`.
-3. Efetive a confirmação do pagamento — via admin (`PATCH /pedidos/:id/status` para `confirmado`) ou simulando o webhook do Stripe local apontando para o Payments do emulador.
-4. `onPedidoStatusChange` dispara automaticamente ao detectar a mudança de `status`; confira o e-mail recebido e/ou o log de envios em [resend.com/emails](https://resend.com/emails) no Dashboard.
+3. Efetive a confirmação do pagamento, via admin (`PATCH /pedidos/:id/status` para `confirmado`) ou simulando o webhook do Stripe local apontando para o Payments do emulador.
+4. `onPedidoStatusChange` dispara automaticamente ao detectar a mudança de `status`. Confira o e-mail recebido e/ou o log de envios em [resend.com/emails](https://resend.com/emails) no Dashboard.
 5. Repita cancelando um pedido em `pendente` para validar o e-mail de cancelamento.
 6. Confirme a cláusula best-effort: force uma falha (ex.: `RESEND_API_KEY` inválida) e confirme, pelo Firestore Emulator UI, que o pedido permanece `confirmado`/`cancelado` normalmente.
 
@@ -427,30 +427,30 @@ pendente
   └─► cancelado (Cliente dono ou Admin; restaura estoque)
 ```
 
-- `pendente → cancelado` — Cliente dono do pedido ou Admin; estoque restaurado (RN06/RN07a).
-- `confirmado → cancelado` — Cliente dono do pedido (RN28) ou Admin (RN07a). Quando é o Cliente quem cancela, o estoque **é** restaurado (RN28); quando é o Admin, o estoque **não** é restaurado automaticamente (RN07a) — assimetria deliberada.
-- `enviado → aguardando_devolucao` — Cliente dono ou Admin (RN29); nenhuma restauração de estoque nem mudança de `paymentStatus` nesta transição (o pedido ainda não está `cancelado`).
-- `aguardando_devolucao → cancelado` — **somente Admin**, confirmando que o produto retornou fisicamente (RN30); estoque restaurado.
+- `pendente → cancelado`: Cliente dono do pedido ou Admin; estoque restaurado (RN06/RN07a).
+- `confirmado → cancelado`: Cliente dono do pedido (RN28) ou Admin (RN07a). Quando é o Cliente quem cancela, o estoque **é** restaurado (RN28). Quando é o Admin, o estoque **não** é restaurado automaticamente (RN07a) — assimetria deliberada.
+- `enviado → aguardando_devolucao`: Cliente dono ou Admin (RN29). Nenhuma restauração de estoque nem mudança de `paymentStatus` nesta transição, o pedido ainda não está `cancelado`.
+- `aguardando_devolucao → cancelado`: **somente Admin**, confirmando que o produto retornou fisicamente (RN30). Estoque restaurado.
 
 ### `paymentStatus` do Pedido (`PaymentStatus`)
 
-- `aguardando_pagamento` — valor inicial, atribuído na criação do pedido junto com a PaymentIntent (RN10).
-- `pago` — setado quando o webhook `payment_intent.succeeded` confirma o pagamento (RN12).
-- `falhou` — setado quando o webhook `payment_intent.payment_failed` (ou equivalente) é recebido (RN13); o pedido também é cancelado e o estoque restaurado nesse mesmo evento.
-- `estorno_pendente` — quando um pedido com `paymentStatus: "pago"` é cancelado por qualquer transição que leve a `cancelado` (RN31), `paymentStatus` muda **automaticamente** para `estorno_pendente`. Essa mudança é o único efeito automático do cancelamento sobre o pagamento — **nenhuma chamada ao Stripe é feita nesse momento**.
-- `reembolsado` — só é alcançado através de uma ação **dedicada, manual e exclusiva do Admin**: `PATCH /pedidos/:id/reembolsar` (RN32), disponível apenas quando `paymentStatus === "estorno_pendente"`, chama `stripe.refunds.create` pelo valor total do pedido. Sucesso → `paymentStatus: "reembolsado"`. Falha na chamada ao Stripe → `paymentStatus` permanece `estorno_pendente` (permite nova tentativa), resposta HTTP 502.
+- `aguardando_pagamento`: valor inicial, atribuído na criação do pedido junto com a PaymentIntent (RN10).
+- `pago`: setado quando o webhook `payment_intent.succeeded` confirma o pagamento (RN12).
+- `falhou`: setado quando o webhook `payment_intent.payment_failed` (ou equivalente) é recebido (RN13). O pedido também é cancelado e o estoque restaurado nesse mesmo evento.
+- `estorno_pendente`: quando um pedido com `paymentStatus: "pago"` é cancelado por qualquer transição que leve a `cancelado` (RN31), `paymentStatus` muda **automaticamente** para `estorno_pendente`. Essa mudança é o único efeito automático do cancelamento sobre o pagamento. **Nenhuma chamada ao Stripe é feita nesse momento.**
+- `reembolsado`: só é alcançado através de uma ação **dedicada, manual e exclusiva do Admin**, `PATCH /pedidos/:id/reembolsar` (RN32), disponível apenas quando `paymentStatus === "estorno_pendente"`. Chama `stripe.refunds.create` pelo valor total do pedido. Sucesso vira `paymentStatus: "reembolsado"`. Falha na chamada ao Stripe mantém `paymentStatus` como `estorno_pendente` (permite nova tentativa), resposta HTTP 502.
 
-> **Reembolso nunca é automático.** Nenhuma transição de `status` dispara por si só uma chamada ao Stripe. O cancelamento apenas sinaliza que um reembolso é devido (`paymentStatus: "estorno_pendente"`); efetivá-lo é sempre uma decisão humana explícita e posterior do Admin.
+> **Reembolso nunca é automático.** Nenhuma transição de `status` dispara por si só uma chamada ao Stripe. O cancelamento só sinaliza que um reembolso é devido (`paymentStatus: "estorno_pendente"`). Efetivá-lo é sempre uma decisão humana explícita e posterior do Admin.
 
 ## Front-end de testes — `web/`
 
-SPA em **React + Vite + TypeScript**, ferramenta de teste/demonstração da API — não é o produto final do portfólio (esse é a API). Roda **exclusivamente contra o Firebase Emulator Suite local** (RN27): nunca aponta para o projeto Firebase real. Dois perfis de uso na mesma aplicação: **Cliente** (catálogo, criação de pedido, pagamento via Stripe Elements, histórico/cancelamento — RN21-RN24) e **Administrador**, via custom claim `admin: true` (CRUD de Produtos e gestão de Pedidos — RN25).
+SPA em **React + Vite + TypeScript**, ferramenta de teste/demonstração da API. Não é o produto final do portfólio, esse é a API. Roda **exclusivamente contra o Firebase Emulator Suite local** (RN27): nunca aponta para o projeto Firebase real. Dois perfis de uso na mesma aplicação: **Cliente** (catálogo, criação de pedido, pagamento via Stripe Elements, histórico/cancelamento, RN21-RN24) e **Administrador**, via custom claim `admin: true` (CRUD de Produtos e gestão de Pedidos, RN25).
 
 ### Como rodar `web/` junto com o Emulator Suite
 
 São **dois processos**, em dois terminais separados:
 
-1. **Terminal 1 — Emulator Suite**, a partir da **raiz do repositório**:
+1. **Terminal 1, Emulator Suite**, a partir da **raiz do repositório**:
    ```bash
    npx firebase-tools emulators:start
    ```
@@ -458,7 +458,7 @@ São **dois processos**, em dois terminais separados:
    ```bash
    curl http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/ordersApi/health
    ```
-2. **Terminal 2 — front-end**, a partir de `web/`:
+2. **Terminal 2, front-end**, a partir de `web/`:
    ```bash
    cd web
    npm install
@@ -467,46 +467,46 @@ São **dois processos**, em dois terminais separados:
    ```
    Abra a URL impressa pelo Vite (padrão `http://localhost:5173`).
 
-Se o Emulator Suite não estiver rodando, o cliente HTTP do front-end (`src/api/apiClient.ts`) detecta a falha de `fetch` e exibe a mensagem "Não foi possível conectar à API. Verifique se o Firebase Emulator Suite está rodando (`firebase emulators:start`)." em vez de travar silenciosamente.
+Se o Emulator Suite não estiver rodando, o cliente HTTP do front-end (`src/api/apiClient.ts`) detecta a falha de `fetch` e mostra a mensagem "Não foi possível conectar à API. Verifique se o Firebase Emulator Suite está rodando (`firebase emulators:start`)." em vez de travar silenciosamente.
 
 ### Criar um cliente de teste e promovê-lo a admin
 
 A área de Administrador (RN25) exige a custom claim `admin: true` no Auth Emulator. Passo a passo:
 
-1. Com os dois processos acima rodando, cadastre um usuário normalmente pela UI (`/cadastro` em `web/`) — ele nasce sem a claim.
+1. Com os dois processos acima rodando, cadastre um usuário normalmente pela UI (`/cadastro` em `web/`). Ele nasce sem a claim.
 2. Em outro terminal, promova esse e-mail a admin no Auth Emulator:
    ```bash
    cd services/orders
    FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 npm run set-admin -- email@exemplo.com
    ```
-   O script recusa-se a rodar sem `FIREBASE_AUTH_EMULATOR_HOST` definido, exatamente para nunca ser usado por engano contra um projeto real.
-3. **A claim setada no passo 2 não aparece automaticamente na sessão já aberta no navegador** — o token em cache do SDK do Firebase Auth só se renova sozinho a cada ~1h. Deslogue e logue novamente em `web/` para forçar a atualização (`AuthContext` força `getIdTokenResult(forceRefresh: true)` logo após login).
+   O script recusa-se a rodar sem `FIREBASE_AUTH_EMULATOR_HOST` definido, justamente para nunca ser usado por engano contra um projeto real.
+3. A claim setada no passo 2 **não** aparece automaticamente na sessão já aberta no navegador. O token em cache do SDK do Firebase Auth só se renova sozinho a cada ~1h. Deslogue e logue novamente em `web/` para forçar a atualização (`AuthContext` força `getIdTokenResult(forceRefresh: true)` logo após login).
 4. Com `isAdmin === true`, os links/rotas de admin (`/admin/produtos`, `/admin/pedidos`) ficam visíveis e acessíveis.
 
-Lembre-se: a claim de admin controla apenas a *exibição* das rotas no front-end (RN26, só UX) — o backend (`requireAdmin`) continua sendo a única fonte real de autorização, com ou sem o front-end.
+Vale lembrar: a claim de admin controla só a *exibição* das rotas no front-end (RN26, puro UX). O backend (`requireAdmin`) continua sendo a única fonte real de autorização, com ou sem o front-end.
 
 ### (Opcional) Stripe CLI — fechar o ciclo RN23 + RN12 (confirmação automática de pagamento)
 
-Ao completar um pagamento de teste no `PaymentForm` (Stripe Elements, cartão `4242 4242 4242 4242`), o `confirmCardPayment` do Stripe.js confirma o pagamento **no Stripe** — isso já exercita RN23 de ponta a ponta isoladamente. Porém, a **transição do status do pedido** para `confirmado` é uma regra separada (RN12) e só acontece quando o backend recebe o webhook `POST /webhooks/stripe`. Como o Emulator Suite roda em `localhost`, o Stripe (serviço externo) não consegue entregar esse webhook diretamente — é necessário o [Stripe CLI](https://docs.stripe.com/stripe-cli) fazendo o encaminhamento:
+Ao completar um pagamento de teste no `PaymentForm` (Stripe Elements, cartão `4242 4242 4242 4242`), o `confirmCardPayment` do Stripe.js confirma o pagamento **no Stripe**. Isso já exercita RN23 de ponta a ponta isoladamente. Mas a **transição do status do pedido** para `confirmado` é uma regra separada (RN12) e só acontece quando o backend recebe o webhook `POST /webhooks/stripe`. Como o Emulator Suite roda em `localhost`, o Stripe (serviço externo) não consegue entregar esse webhook diretamente. É preciso o [Stripe CLI](https://docs.stripe.com/stripe-cli) fazendo o encaminhamento:
 
 ```bash
 stripe listen --forward-to http://localhost:5001/demo-gscandelari-ecommerce-api/us-central1/paymentsApi/webhooks/stripe
 ```
 
-Rode esse comando em um terceiro terminal, autenticado (`stripe login`) na mesma conta Stripe cuja chave de teste está em `services/payments/.env` (`STRIPE_SECRET_KEY`) — o `stripe listen` imprime um signing secret temporário (`whsec_...`); copie-o para `STRIPE_WEBHOOK_SECRET` em `services/payments/.env` (reinicie o Emulator Suite após editar).
+Rode esse comando em um terceiro terminal, autenticado (`stripe login`) na mesma conta Stripe cuja chave de teste está em `services/payments/.env` (`STRIPE_SECRET_KEY`). O `stripe listen` imprime um signing secret temporário (`whsec_...`); copie-o para `STRIPE_WEBHOOK_SECRET` em `services/payments/.env` (reinicie o Emulator Suite depois de editar).
 
-- **Sem o Stripe CLI rodando:** o pagamento é confirmado no Stripe, mas o pedido permanece `pendente` até um Admin alterar o status manualmente pela área de admin — comportamento esperado da ferramenta de teste, não um bug.
-- **Com o Stripe CLI rodando:** o webhook é entregue, o pedido é confirmado automaticamente — fechando o ciclo RN23 (front-end) + RN12 (backend) de ponta a ponta.
+- **Sem o Stripe CLI rodando:** o pagamento é confirmado no Stripe, mas o pedido permanece `pendente` até um Admin alterar o status manualmente pela área de admin. Comportamento esperado da ferramenta de teste, não um bug.
+- **Com o Stripe CLI rodando:** o webhook é entregue, o pedido é confirmado automaticamente, fechando o ciclo RN23 (front-end) + RN12 (backend) de ponta a ponta.
 
 ## Notas de engenharia
 
-Uma seleção de problemas reais encontrados só contra infraestrutura real — nenhum deles reproduzível no Emulator Suite nem nos testes Jest/Supertest, o tipo de coisa que só aparece num deploy de verdade:
+Uma seleção de problemas reais encontrados só contra infraestrutura real. Nenhum deles é reproduzível no Emulator Suite nem nos testes Jest/Supertest — é o tipo de coisa que só aparece num deploy de verdade:
 
 - **Nome de export precisa ser um identificador JS válido.** Um export renomeado via string-literal (`export { x as "orders-api" }`) funciona no Emulator Suite (que introspecciona os exports diretamente), mas quebra a resolução de `entry_point` do Cloud Functions real.
-- **Codebases não namespaceiam o ID da function automaticamente.** O ID final é literalmente o identificador exportado, único por **projeto+região**, não por codebase — dois codebases exportando o mesmo nome colidem (`More than one codebase claims functions/api`).
-- **Opções de build-time não podem ler `process.env.X` direto.** `serviceAccount: process.env.X` sempre resolve `undefined` num deploy real: o Firebase CLI faz o `require()` do codebase para descobrir as functions (avaliando esse literal de opções) **antes** de carregar o `.env.<project-id>` em `process.env`. Fix: API de Parameterized Configuration do `firebase-functions` v2 (`defineString`), resolvida numa fase posterior do deploy, já com o `.env` carregado.
-- **O SDK do Resend não lança exceção em erros de nível de API.** `emails.send()` devolve `{ data: null, error }` — sem checar esse campo explicitamente, uma rejeição da API passa batido, sem nenhum log, indistinguível de um envio bem-sucedido.
-- **Provisionamento de um projeto Firebase real do zero tem passos manuais não óbvios** (Auth, Firestore API, criação do banco com ID literal `(default)`, deploy das rules) — ver [Pré-requisitos de provisionamento](#deploy) na seção Deploy.
+- **Codebases não namespaceiam o ID da function automaticamente.** O ID final é literalmente o identificador exportado, único por **projeto+região**, não por codebase. Dois codebases exportando o mesmo nome colidem (`More than one codebase claims functions/api`).
+- **Opções de build-time não podem ler `process.env.X` direto.** `serviceAccount: process.env.X` sempre resolve `undefined` num deploy real: o Firebase CLI faz o `require()` do codebase para descobrir as functions, avaliando esse literal de opções, antes de carregar o `.env.<project-id>` em `process.env`. O fix é a API de Parameterized Configuration do `firebase-functions` v2 (`defineString`), resolvida numa fase posterior do deploy, já com o `.env` carregado.
+- **O SDK do Resend não lança exceção em erros de nível de API.** `emails.send()` devolve `{ data: null, error }`. Sem checar esse campo explicitamente, uma rejeição da API passa batido, sem nenhum log, indistinguível de um envio bem-sucedido.
+- **Provisionamento de um projeto Firebase real do zero tem passos manuais não óbvios**, entre eles Auth, Firestore API, criação do banco com ID literal `(default)` e deploy das rules. Ver [Pré-requisitos de provisionamento](#deploy) na seção Deploy.
 
 ## Contribuindo
 
