@@ -19,7 +19,10 @@
   "tags": [
     { "name": "System", "description": "Service health check" },
     { "name": "Products", "description": "Product catalog (RN01, RN07)" },
-    { "name": "Orders", "description": "Orders, payment, cancellation and refund (RN02-RN09, RN07a, RN10, RN16, RN28-RN33)" }
+    {
+      "name": "Orders",
+      "description": "Orders, payment, cancellation and refund (RN02-RN09, RN07a, RN10, RN16, RN28-RN33)"
+    }
   ],
   "components": {
     "securitySchemes": {
@@ -63,9 +66,25 @@
         "type": "object",
         "description": "Product fields (\"produto\" = product).",
         "properties": {
-          "nome": { "type": "string", "minLength": 1, "example": "Camiseta", "description": "Product name." },
-          "preco": { "type": "number", "minimum": 0, "exclusiveMinimum": true, "example": 49.9, "description": "Price." },
-          "estoque": { "type": "integer", "minimum": 0, "example": 10, "description": "Stock quantity." }
+          "nome": {
+            "type": "string",
+            "minLength": 1,
+            "example": "Camiseta",
+            "description": "Product name."
+          },
+          "preco": {
+            "type": "number",
+            "minimum": 0,
+            "exclusiveMinimum": true,
+            "example": 49.9,
+            "description": "Price."
+          },
+          "estoque": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 10,
+            "description": "Stock quantity."
+          }
         },
         "required": ["nome", "preco", "estoque"]
       },
@@ -79,7 +98,13 @@
         "type": "object",
         "properties": {
           "produtoId": { "type": "string", "description": "Product ID." },
-          "quantidade": { "type": "integer", "minimum": 0, "exclusiveMinimum": true, "example": 2, "description": "Quantity." }
+          "quantidade": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true,
+            "example": 2,
+            "description": "Quantity."
+          }
         },
         "required": ["produtoId", "quantidade"]
       },
@@ -111,7 +136,14 @@
       "PedidoStatus": {
         "type": "string",
         "description": "RN05: main flow pendente (pending) → confirmado (confirmed) → enviado (shipped) → entregue (delivered). Cancellation is reachable from pendente, confirmado or enviado — from enviado, it first becomes aguardando_devolucao (RN29), only then cancelado (RN30, Admin only). entregue and cancelado are terminal states. Values are kept in Portuguese — they're the literal strings the API returns.",
-        "enum": ["pendente", "confirmado", "enviado", "entregue", "aguardando_devolucao", "cancelado"]
+        "enum": [
+          "pendente",
+          "confirmado",
+          "enviado",
+          "entregue",
+          "aguardando_devolucao",
+          "cancelado"
+        ]
       },
       "PaymentStatus": {
         "type": "string",
@@ -122,7 +154,10 @@
         "type": "object",
         "properties": {
           "id": { "type": "string" },
-          "clienteId": { "type": "string", "description": "Firebase Auth uid of the customer who owns the order." },
+          "clienteId": {
+            "type": "string",
+            "description": "Firebase Auth uid of the customer who owns the order."
+          },
           "itens": { "type": "array", "items": { "$ref": "#/components/schemas/ItemPedido" } },
           "total": { "type": "number" },
           "status": { "$ref": "#/components/schemas/PedidoStatus" },
@@ -346,12 +381,16 @@
           },
           "400": {
             "description": "Invalid payload, a product doesn't exist, or insufficient stock for some item (`VALIDATION_ERROR`, RN03).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "502": {
             "description": "Failed to create the PaymentIntent with Stripe (`PAYMENT_GATEWAY_ERROR`) — the order that was just created is automatically cancelled and stock restored (compensation).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           }
         }
       }
@@ -402,7 +441,9 @@
           },
           "400": {
             "description": "Structurally invalid status transition for the order's current state (`VALIDATION_ERROR`, RN05).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },
@@ -428,12 +469,16 @@
           },
           "400": {
             "description": "Order is not in a status the Customer can cancel — only `pendente`, `confirmado` or `enviado` (`VALIDATION_ERROR`).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": {
             "description": "The order belongs to a different customer (`FORBIDDEN`).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "404": { "$ref": "#/components/responses/NotFound" }
         }
@@ -457,7 +502,9 @@
           },
           "400": {
             "description": "The order's paymentStatus is not estorno_pendente (`VALIDATION_ERROR`).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },

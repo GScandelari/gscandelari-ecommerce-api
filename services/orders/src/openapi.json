@@ -19,7 +19,10 @@
   "tags": [
     { "name": "Sistema", "description": "Health check do serviço" },
     { "name": "Produtos", "description": "Catálogo de produtos (RN01, RN07)" },
-    { "name": "Pedidos", "description": "Pedidos, pagamento, cancelamento e reembolso (RN02-RN09, RN07a, RN10, RN16, RN28-RN33)" }
+    {
+      "name": "Pedidos",
+      "description": "Pedidos, pagamento, cancelamento e reembolso (RN02-RN09, RN07a, RN10, RN16, RN28-RN33)"
+    }
   ],
   "components": {
     "securitySchemes": {
@@ -108,7 +111,14 @@
       "PedidoStatus": {
         "type": "string",
         "description": "RN05: fluxo principal pendente → confirmado → enviado → entregue. Cancelamento é alcançável a partir de pendente, confirmado ou enviado — a partir de enviado, primeiro vira aguardando_devolucao (RN29), só então cancelado (RN30, somente Admin). entregue e cancelado são estados finais.",
-        "enum": ["pendente", "confirmado", "enviado", "entregue", "aguardando_devolucao", "cancelado"]
+        "enum": [
+          "pendente",
+          "confirmado",
+          "enviado",
+          "entregue",
+          "aguardando_devolucao",
+          "cancelado"
+        ]
       },
       "PaymentStatus": {
         "type": "string",
@@ -119,7 +129,10 @@
         "type": "object",
         "properties": {
           "id": { "type": "string" },
-          "clienteId": { "type": "string", "description": "uid do Firebase Auth do cliente dono do pedido." },
+          "clienteId": {
+            "type": "string",
+            "description": "uid do Firebase Auth do cliente dono do pedido."
+          },
           "itens": { "type": "array", "items": { "$ref": "#/components/schemas/ItemPedido" } },
           "total": { "type": "number" },
           "status": { "$ref": "#/components/schemas/PedidoStatus" },
@@ -343,12 +356,16 @@
           },
           "400": {
             "description": "Payload inválido, produto inexistente ou estoque insuficiente para algum item (`VALIDATION_ERROR`, RN03).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "502": {
             "description": "Falha ao criar a PaymentIntent junto ao Stripe (`PAYMENT_GATEWAY_ERROR`) — o pedido já criado é automaticamente cancelado e o estoque restaurado (compensação).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           }
         }
       }
@@ -399,7 +416,9 @@
           },
           "400": {
             "description": "Transição de status estruturalmente inválida para o estado atual do pedido (`VALIDATION_ERROR`, RN05).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },
@@ -425,12 +444,16 @@
           },
           "400": {
             "description": "Pedido não está em um status cancelável pelo Cliente — só `pendente`, `confirmado` ou `enviado` (`VALIDATION_ERROR`).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": {
             "description": "O pedido pertence a outro cliente (`FORBIDDEN`).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "404": { "$ref": "#/components/responses/NotFound" }
         }
@@ -454,7 +477,9 @@
           },
           "400": {
             "description": "paymentStatus do pedido não é estorno_pendente (`VALIDATION_ERROR`).",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },
