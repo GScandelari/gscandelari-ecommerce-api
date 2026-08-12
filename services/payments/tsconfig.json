@@ -3,7 +3,15 @@
     "target": "ES2022",
     "module": "commonjs",
     "lib": ["ES2022"],
-    "moduleResolution": "node",
+    // "node10" e a estrategia classica de resolucao de modulos do Node.js
+    // (CommonJS, sem extensao obrigatoria em import relativo) - mesmo
+    // comportamento que "node" (nome antigo, removido do TS). O proprio
+    // TypeScript 5.9 ja marca "node10" como destinado a remocao na v7.0
+    // (nunca vai ganhar suporte a novas features de resolucao do Node,
+    // so mantido por compatibilidade) - ignoreDeprecations silencia o
+    // aviso ate a migracao real pra "nodenext"/"bundler" ser necessaria.
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "5.0",
     "outDir": "lib",
     "rootDir": ".",
     "baseUrl": ".",
